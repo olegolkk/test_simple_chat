@@ -1,36 +1,27 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.middleware.trustedhost import TrustedHostMiddleware
 import asyncio
 import json
 import os
+import logging
 from typing import Dict, Set, List
 from datetime import datetime
-from dotenv import load_dotenv
 
-load_dotenv()
+# Настройка логирования
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-app = FastAPI(title="WebSocket Chat Server", version="1.0.0")
+app = FastAPI(title="WebSocket + WebRTC Chat Server", version="1.0.0")
 
-# Настройки для продакшена
-ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "*").split(",")
-ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
-
-# Middleware
+# CORS настройки
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"] if ENVIRONMENT == "development" else os.getenv("ALLOWED_ORIGINS", "").split(","),
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-if ENVIRONMENT == "production":
-    app.add_middleware(
-        TrustedHostMiddleware,
-        allowed_hosts=ALLOWED_HOSTS
-    )
 
 
 # Хранилище активных соединений чата
@@ -47,6 +38,7 @@ class ConnectionManager:
             self.rooms[room] = set()
         self.rooms[room].add(client_id)
 
+        logger.info(f"Client {client_id} connected to room {room}")
         return client_id
 
     def disconnect(self, client_id: str, room: str = "general"):
@@ -56,13 +48,14 @@ class ConnectionManager:
             self.rooms[room].remove(client_id)
             if not self.rooms[room]:
                 del self.rooms[room]
+        logger.info(f"Client {client_id} disconnected from room {room}")
 
     async def send_personal_message(self, message: dict, client_id: str):
         if client_id in self.active_connections:
             try:
                 await self.active_connections[client_id].send_json(message)
-            except:
-                pass
+            except Exception as e:
+                logger.error(f"Error sending message to {client_id}: {e}")
 
     async def broadcast_to_room(self, message: dict, room: str = "general", exclude: str = None):
         if room in self.rooms:
@@ -70,8 +63,8 @@ class ConnectionManager:
                 if client_id != exclude and client_id in self.active_connections:
                     try:
                         await self.active_connections[client_id].send_json(message)
-                    except:
-                        pass
+                    except Exception as e:
+                        logger.error(f"Error broadcasting to {client_id}: {e}")
 
     def get_room_users(self, room: str) -> List[str]:
         if room in self.rooms:
@@ -94,7 +87,7 @@ class WebRTCManager:
             self.rooms[room] = {}
 
         self.rooms[room][client_id] = websocket
-        print(f"WebRTC: {client_id} connected to room {room}")
+        logger.info(f"WebRTC: {client_id} connected to room {room}")
 
         # Отправляем новому клиенту список всех участников WebRTC в комнате
         participants = list(self.rooms[room].keys())
@@ -106,7 +99,7 @@ class WebRTCManager:
     def disconnect(self, room: str, client_id: str):
         if room in self.rooms and client_id in self.rooms[room]:
             del self.rooms[room][client_id]
-            print(f"WebRTC: {client_id} disconnected from room {room}")
+            logger.info(f"WebRTC: {client_id} disconnected from room {room}")
 
             if not self.rooms[room]:
                 del self.rooms[room]
@@ -118,14 +111,14 @@ class WebRTCManager:
                     message["from"] = from_client
                 await self.rooms[room][target_client].send_json(message)
                 return True
-            except:
-                pass
+            except Exception as e:
+                logger.error(f"Error sending WebRTC message: {e}")
         return False
 
 
 webrtc_manager = WebRTCManager()
 
-# HTML страница (та же, что и в предыдущей версии)
+# HTML страница с полной поддержкой WebRTC
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="ru">
@@ -141,7 +134,7 @@ HTML_TEMPLATE = """
         }
 
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             height: 100vh;
             overflow: hidden;
@@ -242,14 +235,20 @@ HTML_TEMPLATE = """
             background: #1abc9c;
             border: none;
             color: white;
-            padding: 2px 8px;
+            padding: 4px 10px;
             border-radius: 4px;
             cursor: pointer;
             font-size: 10px;
+            transition: all 0.3s;
         }
 
         .call-btn:hover {
             background: #16a085;
+            transform: scale(1.05);
+        }
+
+        .call-btn.active-call {
+            background: #e74c3c;
         }
 
         .chat-area {
@@ -296,14 +295,16 @@ HTML_TEMPLATE = """
             min-width: 300px;
             position: relative;
             background: #16213e;
-            border-radius: 8px;
+            border-radius: 12px;
             overflow: hidden;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
         }
 
         .video-wrapper video {
             width: 100%;
             background: #0f0f1f;
-            border-radius: 8px;
+            border-radius: 12px;
+            transform: scaleX(-1);
         }
 
         .video-label {
@@ -312,9 +313,10 @@ HTML_TEMPLATE = """
             left: 10px;
             background: rgba(0,0,0,0.7);
             color: white;
-            padding: 4px 8px;
-            border-radius: 4px;
+            padding: 4px 12px;
+            border-radius: 20px;
             font-size: 12px;
+            backdrop-filter: blur(5px);
         }
 
         .call-controls {
@@ -328,10 +330,17 @@ HTML_TEMPLATE = """
             background: #e74c3c;
             color: white;
             border: none;
-            padding: 10px 20px;
-            border-radius: 6px;
+            padding: 10px 24px;
+            border-radius: 25px;
             cursor: pointer;
             font-size: 14px;
+            font-weight: bold;
+            transition: all 0.3s;
+        }
+
+        .call-btn-large:hover {
+            background: #c0392b;
+            transform: scale(1.05);
         }
 
         .messages-area {
@@ -382,10 +391,11 @@ HTML_TEMPLATE = """
         .message-content {
             background: white;
             padding: 8px 12px;
-            border-radius: 8px;
+            border-radius: 12px;
             display: inline-block;
             max-width: 70%;
             word-wrap: break-word;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.1);
         }
 
         .message.own {
@@ -409,8 +419,14 @@ HTML_TEMPLATE = """
             flex: 1;
             padding: 12px;
             border: 1px solid #ddd;
-            border-radius: 6px;
+            border-radius: 25px;
             font-size: 14px;
+            outline: none;
+            transition: border-color 0.3s;
+        }
+
+        .input-area input:focus {
+            border-color: #3498db;
         }
 
         .input-area button {
@@ -418,13 +434,15 @@ HTML_TEMPLATE = """
             background: #3498db;
             color: white;
             border: none;
-            border-radius: 6px;
+            border-radius: 25px;
             cursor: pointer;
             font-size: 14px;
+            transition: all 0.3s;
         }
 
         .input-area button:hover {
             background: #2980b9;
+            transform: scale(1.05);
         }
 
         .status {
@@ -439,6 +457,58 @@ HTML_TEMPLATE = """
             font-size: 11px;
             color: #1abc9c;
             margin-top: 5px;
+        }
+
+        .incoming-call {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: white;
+            padding: 15px 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            z-index: 1000;
+            animation: slideIn 0.3s;
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(100%);
+            }
+            to {
+                transform: translateX(0);
+            }
+        }
+
+        .incoming-call button {
+            margin-left: 10px;
+            padding: 5px 15px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+
+        .accept-call {
+            background: #2ecc71;
+            color: white;
+        }
+
+        .reject-call {
+            background: #e74c3c;
+            color: white;
+        }
+
+        .mic-control {
+            position: absolute;
+            bottom: 10px;
+            right: 10px;
+            background: rgba(0,0,0,0.7);
+            border: none;
+            color: white;
+            padding: 5px 10px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 12px;
         }
     </style>
 </head>
@@ -466,19 +536,19 @@ HTML_TEMPLATE = """
         <div class="chat-area">
             <div class="chat-header">
                 <h2 id="currentRoom">general</h2>
-                <p>WebSocket + WebRTC Чат</p>
+                <p>WebSocket + WebRTC Чат | Видеозвонки</p>
             </div>
 
             <div class="video-area" id="videoArea">
                 <div class="videos-container" id="videosContainer"></div>
                 <div class="call-controls">
-                    <button class="call-btn-large" id="endCallBtn" style="display: none;">Завершить звонок</button>
+                    <button class="call-btn-large" id="endCallBtn" style="display: none;">🔴 Завершить звонок</button>
                 </div>
             </div>
 
             <div class="messages-area" id="messages">
                 <div class="message system">
-                    <div class="message-content">💬 Добро пожаловать в чат! Начните общение прямо сейчас.</div>
+                    <div class="message-content">💬 Добро пожаловать в чат! Нажмите 📞 для видеозвонка</div>
                 </div>
             </div>
 
@@ -494,8 +564,15 @@ HTML_TEMPLATE = """
     <script>
         // Глобальные переменные
         let ws = null;
+        let webrtcWs = null;
         let clientId = localStorage.getItem('clientId') || 'user_' + Math.random().toString(36).substr(2, 8);
         let currentRoom = 'general';
+
+        // WebRTC переменные
+        let localStream = null;
+        let peerConnections = new Map();
+        let activeCall = null;
+        let pendingOffer = null;
 
         // DOM элементы
         const messagesDiv = document.getElementById('messages');
@@ -518,78 +595,86 @@ HTML_TEMPLATE = """
         const wsUrl = `${protocol}//${window.location.host}`;
 
         console.log('Client ID:', clientId);
-        console.log('WebSocket URL:', wsUrl);
 
-        // Подключение к WebSocket
+        // Подключение к WebSocket чата
         function connectWebSocket() {
             const url = `${wsUrl}/ws/${clientId}/${currentRoom}`;
-            console.log('Connecting to:', url);
+            console.log('Connecting to chat WS:', url);
 
             try {
                 ws = new WebSocket(url);
 
                 ws.onopen = () => {
-                    console.log('✅ WebSocket connected');
+                    console.log('✅ Chat WebSocket connected');
                     statusDiv.innerHTML = '✅ Подключен к чату';
                     statusDiv.style.background = '#d4edda';
                     statusDiv.style.color = '#155724';
-                    addSystemMessage('Подключение к серверу установлено');
                 };
 
                 ws.onmessage = (event) => {
-                    console.log('📨 Received:', event.data);
-                    try {
-                        const message = JSON.parse(event.data);
-                        handleMessage(message);
-                    } catch (e) {
-                        console.error('Error parsing message:', e);
-                    }
+                    const message = JSON.parse(event.data);
+                    handleChatMessage(message);
                 };
 
                 ws.onclose = () => {
-                    console.log('❌ WebSocket disconnected');
-                    statusDiv.innerHTML = '❌ Отключен. Переподключение через 3 сек...';
+                    console.log('❌ Chat WebSocket disconnected');
+                    statusDiv.innerHTML = '❌ Отключен. Переподключение...';
                     statusDiv.style.background = '#f8d7da';
                     statusDiv.style.color = '#721c24';
-                    addSystemMessage('Соединение потеряно, переподключение...');
                     setTimeout(() => connectWebSocket(), 3000);
                 };
 
                 ws.onerror = (error) => {
-                    console.error('WebSocket error:', error);
-                    statusDiv.innerHTML = '⚠️ Ошибка подключения';
+                    console.error('Chat WebSocket error:', error);
                 };
             } catch (error) {
                 console.error('Error creating WebSocket:', error);
             }
         }
 
-        // Обработка сообщений
-        function handleMessage(message) {
-            console.log('Handling message:', message);
+        // Подключение к WebRTC сигналингу
+        function connectWebRTC() {
+            const url = `${wsUrl}/ws/webrtc/${currentRoom}/${clientId}`;
+            console.log('Connecting to WebRTC signaling:', url);
 
+            try {
+                webrtcWs = new WebSocket(url);
+
+                webrtcWs.onopen = () => {
+                    console.log('✅ WebRTC signaling connected');
+                };
+
+                webrtcWs.onmessage = async (event) => {
+                    const signal = JSON.parse(event.data);
+                    await handleWebRTCSignal(signal);
+                };
+
+                webrtcWs.onclose = () => {
+                    console.log('❌ WebRTC signaling disconnected');
+                    setTimeout(() => connectWebRTC(), 3000);
+                };
+            } catch (error) {
+                console.error('Error creating WebRTC WebSocket:', error);
+            }
+        }
+
+        // Обработка сообщений чата
+        function handleChatMessage(message) {
             switch(message.type) {
                 case 'system':
                     addSystemMessage(message.content);
                     break;
-
                 case 'chat':
                     addChatMessage(message.client_id, message.content, message.timestamp);
                     break;
-
-                default:
-                    console.log('Unknown message type:', message.type);
             }
-
-            // Обновляем список пользователей
             fetchUsers();
         }
 
-        // Добавление сообщения в чат
+        // Добавление сообщений
         function addChatMessage(sender, content, timestamp) {
             const messageDiv = document.createElement('div');
             messageDiv.className = `message ${sender === clientId ? 'own' : ''}`;
-
             const time = timestamp ? new Date(timestamp).toLocaleTimeString() : new Date().toLocaleTimeString();
             const senderName = sender === clientId ? 'Вы' : escapeHtml(sender);
 
@@ -619,15 +704,10 @@ HTML_TEMPLATE = """
             if (!content) return;
 
             if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({
-                    type: 'chat',
-                    content: content
-                }));
+                ws.send(JSON.stringify({ type: 'chat', content: content }));
                 messageInput.value = '';
-                console.log('Message sent:', content);
             } else {
                 addSystemMessage('❌ Нет подключения к серверу');
-                console.log('WebSocket not open, state:', ws ? ws.readyState : 'null');
             }
         }
 
@@ -636,7 +716,6 @@ HTML_TEMPLATE = """
             try {
                 const response = await fetch('/rooms');
                 const data = await response.json();
-                console.log('Rooms data:', data);
 
                 if (data.room_details && data.room_details[currentRoom]) {
                     const users = data.room_details[currentRoom].clients || [];
@@ -662,9 +741,13 @@ HTML_TEMPLATE = """
                 const userItem = document.createElement('div');
                 userItem.className = 'user-item';
                 if (user !== clientId) {
+                    const isCalling = activeCall === user;
                     userItem.innerHTML = `
                         <span>👤 ${escapeHtml(user)}</span>
-                        <button class="call-btn" onclick="startCall('${escapeHtml(user)}')">📞 Видеозвонок</button>
+                        <button class="call-btn ${isCalling ? 'active-call' : ''}" 
+                                onclick="startCall('${escapeHtml(user)}')">
+                            ${isCalling ? '📞 В звонке' : '📞 Видеозвонок'}
+                        </button>
                     `;
                 } else {
                     userItem.innerHTML = `<span>👤 ${escapeHtml(user)} (Вы)</span>`;
@@ -673,21 +756,287 @@ HTML_TEMPLATE = """
             });
         }
 
-        // WebRTC функции (заглушки для теста)
+        // WebRTC функции
         async function startCall(targetClientId) {
-            addSystemMessage(`📞 Видеозвонок ${targetClientId} (функция в разработке)`);
-            alert('Видеозвонки требуют HTTPS. Функция будет доступна после настройки SSL.');
+            if (activeCall) {
+                addSystemMessage(`Уже в звонке с ${activeCall}. Завершите текущий звонок.`);
+                return;
+            }
+
+            try {
+                addSystemMessage(`📞 Инициализация звонка для ${targetClientId}...`);
+
+                // Получаем доступ к медиа
+                localStream = await navigator.mediaDevices.getUserMedia({ 
+                    video: true, 
+                    audio: true 
+                });
+
+                // Показываем видео
+                videoArea.classList.add('active');
+                endCallBtn.style.display = 'block';
+
+                // Создаем видео элементы
+                videosContainer.innerHTML = `
+                    <div class="video-wrapper">
+                        <video id="localVideo" autoplay muted playsinline></video>
+                        <div class="video-label">Вы</div>
+                        <button class="mic-control" onclick="toggleMute()">🔊 Микрофон</button>
+                    </div>
+                    <div class="video-wrapper">
+                        <video id="remoteVideo" autoplay playsinline></video>
+                        <div class="video-label">${escapeHtml(targetClientId)}</div>
+                    </div>
+                `;
+
+                document.getElementById('localVideo').srcObject = localStream;
+
+                // Создаем RTCPeerConnection
+                const pc = new RTCPeerConnection({
+                    iceServers: [
+                        { urls: 'stun:stun.l.google.com:19302' },
+                        { urls: 'stun:stun1.l.google.com:19302' },
+                        { urls: 'stun:stun2.l.google.com:19302' }
+                    ]
+                });
+
+                peerConnections.set(targetClientId, pc);
+                activeCall = targetClientId;
+
+                // Добавляем треки
+                localStream.getTracks().forEach(track => {
+                    pc.addTrack(track, localStream);
+                });
+
+                // ICE кандидаты
+                pc.onicecandidate = (event) => {
+                    if (event.candidate && webrtcWs && webrtcWs.readyState === WebSocket.OPEN) {
+                        webrtcWs.send(JSON.stringify({
+                            type: 'ice-candidate',
+                            target: targetClientId,
+                            candidate: event.candidate
+                        }));
+                    }
+                };
+
+                // Получение удаленного потока
+                pc.ontrack = (event) => {
+                    const remoteVideo = document.getElementById('remoteVideo');
+                    if (remoteVideo) {
+                        remoteVideo.srcObject = event.streams[0];
+                    }
+                };
+
+                // Создаем offer
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+
+                webrtcWs.send(JSON.stringify({
+                    type: 'offer',
+                    target: targetClientId,
+                    offer: offer
+                }));
+
+                addSystemMessage(`📞 Звонок пользователю ${targetClientId}...`);
+
+            } catch (error) {
+                console.error('Ошибка при начале звонка:', error);
+                addSystemMessage(`❌ Не удалось получить доступ к камере/микрофону: ${error.message}`);
+                endCall();
+            }
+        }
+
+        async function handleWebRTCSignal(signal) {
+            console.log('WebRTC signal:', signal.type, signal.from);
+
+            const { type, from, offer, answer, candidate } = signal;
+
+            if (type === 'offer') {
+                // Сохраняем offer и показываем уведомление
+                pendingOffer = { from, offer };
+                showIncomingCall(from);
+
+            } else if (type === 'answer') {
+                const pc = peerConnections.get(from);
+                if (pc && answer) {
+                    await pc.setRemoteDescription(answer);
+                }
+
+            } else if (type === 'ice-candidate') {
+                const pc = peerConnections.get(from);
+                if (pc && candidate) {
+                    await pc.addIceCandidate(candidate);
+                }
+            }
+        }
+
+        function showIncomingCall(from) {
+            // Создаем уведомление
+            const notification = document.createElement('div');
+            notification.className = 'incoming-call';
+            notification.innerHTML = `
+                <strong>📞 Входящий звонок</strong><br>
+                от ${escapeHtml(from)}
+                <div style="margin-top: 10px;">
+                    <button class="accept-call" onclick="acceptCall()">✅ Принять</button>
+                    <button class="reject-call" onclick="rejectCall()">❌ Отклонить</button>
+                </div>
+            `;
+            document.body.appendChild(notification);
+
+            // Сохраняем обработчики
+            window.acceptCall = () => {
+                notification.remove();
+                acceptCallInternal(from);
+            };
+
+            window.rejectCall = () => {
+                notification.remove();
+                webrtcWs.send(JSON.stringify({
+                    type: 'reject',
+                    target: from
+                }));
+                addSystemMessage(`❌ Звонок от ${from} отклонен`);
+            };
+
+            // Автоматическое удаление через 30 секунд
+            setTimeout(() => {
+                if (notification.parentNode) {
+                    notification.remove();
+                }
+            }, 30000);
+        }
+
+        async function acceptCallInternal(from) {
+            try {
+                addSystemMessage(`📞 Принятие звонка от ${from}...`);
+
+                // Получаем доступ к медиа
+                localStream = await navigator.mediaDevices.getUserMedia({ 
+                    video: true, 
+                    audio: true 
+                });
+
+                // Показываем видео
+                videoArea.classList.add('active');
+                endCallBtn.style.display = 'block';
+
+                videosContainer.innerHTML = `
+                    <div class="video-wrapper">
+                        <video id="localVideo" autoplay muted playsinline></video>
+                        <div class="video-label">Вы</div>
+                        <button class="mic-control" onclick="toggleMute()">🔊 Микрофон</button>
+                    </div>
+                    <div class="video-wrapper">
+                        <video id="remoteVideo" autoplay playsinline></video>
+                        <div class="video-label">${escapeHtml(from)}</div>
+                    </div>
+                `;
+
+                document.getElementById('localVideo').srcObject = localStream;
+
+                // Создаем RTCPeerConnection
+                const pc = new RTCPeerConnection({
+                    iceServers: [
+                        { urls: 'stun:stun.l.google.com:19302' },
+                        { urls: 'stun:stun1.l.google.com:19302' }
+                    ]
+                });
+
+                peerConnections.set(from, pc);
+                activeCall = from;
+
+                // Добавляем треки
+                localStream.getTracks().forEach(track => {
+                    pc.addTrack(track, localStream);
+                });
+
+                // ICE кандидаты
+                pc.onicecandidate = (event) => {
+                    if (event.candidate && webrtcWs && webrtcWs.readyState === WebSocket.OPEN) {
+                        webrtcWs.send(JSON.stringify({
+                            type: 'ice-candidate',
+                            target: from,
+                            candidate: event.candidate
+                        }));
+                    }
+                };
+
+                // Получение удаленного потока
+                pc.ontrack = (event) => {
+                    const remoteVideo = document.getElementById('remoteVideo');
+                    if (remoteVideo) {
+                        remoteVideo.srcObject = event.streams[0];
+                    }
+                };
+
+                // Устанавливаем offer и создаем answer
+                await pc.setRemoteDescription(pendingOffer.offer);
+                const answer = await pc.createAnswer();
+                await pc.setLocalDescription(answer);
+
+                webrtcWs.send(JSON.stringify({
+                    type: 'answer',
+                    target: from,
+                    answer: answer
+                }));
+
+                addSystemMessage(`📞 Звонок с ${from} установлен`);
+                pendingOffer = null;
+
+            } catch (error) {
+                console.error('Ошибка при принятии звонка:', error);
+                addSystemMessage(`❌ Ошибка при подключении: ${error.message}`);
+                endCall();
+            }
         }
 
         function endCall() {
+            if (activeCall && peerConnections.has(activeCall)) {
+                const pc = peerConnections.get(activeCall);
+                pc.close();
+                peerConnections.delete(activeCall);
+            }
+
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+                localStream = null;
+            }
+
+            videoArea.classList.remove('active');
+            endCallBtn.style.display = 'none';
+            videosContainer.innerHTML = '';
+            activeCall = null;
+            pendingOffer = null;
+
             addSystemMessage('🔴 Звонок завершен');
+
+            // Обновляем список пользователей для сброса статуса кнопки
+            fetchUsers();
+        }
+
+        function toggleMute() {
+            if (localStream) {
+                const audioTrack = localStream.getAudioTracks()[0];
+                if (audioTrack) {
+                    audioTrack.enabled = !audioTrack.enabled;
+                    const micBtn = document.querySelector('.mic-control');
+                    if (micBtn) {
+                        micBtn.textContent = audioTrack.enabled ? '🔊 Микрофон' : '🔇 Микрофон выкл';
+                    }
+                }
+            }
         }
 
         // Смена комнаты
         function changeRoom(room) {
             if (room === currentRoom) return;
 
-            console.log('Changing room from', currentRoom, 'to', room);
+            // Завершаем звонок
+            if (activeCall) {
+                endCall();
+            }
+
             currentRoom = room;
             currentRoomSpan.textContent = room;
 
@@ -696,21 +1045,26 @@ HTML_TEMPLATE = """
             addSystemMessage(`Переход в комнату ${room}...`);
 
             // Переподключаемся
-            if (ws) {
-                ws.close();
-            }
-            connectWebSocket();
+            if (ws) ws.close();
+            if (webrtcWs) webrtcWs.close();
 
-            // Обновляем активную комнату в UI
+            setTimeout(() => {
+                connectWebSocket();
+                connectWebRTC();
+            }, 100);
+
+            // Обновляем активную комнату
             document.querySelectorAll('.room-item').forEach(item => {
                 item.classList.remove('active');
                 if (item.dataset.room === room) {
                     item.classList.add('active');
                 }
             });
+
+            setTimeout(fetchUsers, 1000);
         }
 
-        // Экранирование HTML
+        // Вспомогательные функции
         function escapeHtml(text) {
             const div = document.createElement('div');
             div.textContent = text;
@@ -721,28 +1075,23 @@ HTML_TEMPLATE = """
         function init() {
             console.log('Initializing app...');
             connectWebSocket();
+            connectWebRTC();
 
-            // Обработчики событий
             sendBtn.addEventListener('click', sendMessage);
             messageInput.addEventListener('keypress', (e) => {
                 if (e.key === 'Enter') sendMessage();
             });
 
-            // Обработчики смены комнаты
+            endCallBtn.addEventListener('click', endCall);
+
             document.querySelectorAll('.room-item').forEach(item => {
                 item.addEventListener('click', () => changeRoom(item.dataset.room));
             });
 
-            // Запрашиваем список пользователей каждые 5 секунд
             setInterval(fetchUsers, 5000);
-
-            // Первоначальная загрузка
             setTimeout(fetchUsers, 1000);
-
-            console.log('App initialized, clientId:', clientId);
         }
 
-        // Запуск приложения
         init();
     </script>
 </body>
@@ -750,25 +1099,19 @@ HTML_TEMPLATE = """
 """
 
 
+# API Endpoints
 @app.get("/")
 async def get_root():
-    """Главная страница"""
     return HTMLResponse(HTML_TEMPLATE)
 
 
 @app.get("/health")
 async def health_check():
-    """Проверка здоровья сервера"""
-    return {
-        "status": "healthy",
-        "environment": ENVIRONMENT,
-        "timestamp": datetime.now().isoformat()
-    }
+    return {"status": "healthy", "timestamp": datetime.now().isoformat()}
 
 
 @app.get("/stats")
 async def get_stats():
-    """Получить статистику сервера"""
     return {
         "total_connections": len(manager.active_connections),
         "active_rooms": len(manager.rooms),
@@ -783,7 +1126,6 @@ async def get_stats():
 
 @app.get("/rooms")
 async def get_rooms():
-    """Получить список всех комнат"""
     return {
         "rooms": list(manager.rooms.keys()),
         "room_details": {
@@ -796,125 +1138,69 @@ async def get_rooms():
 
 
 @app.websocket("/ws/{client_id}/{room}")
-async def websocket_endpoint(
-        websocket: WebSocket,
-        client_id: str,
-        room: str = "general"
-):
+async def websocket_endpoint(websocket: WebSocket, client_id: str, room: str = "general"):
     try:
         await manager.connect(websocket, client_id, room)
 
-        welcome_message = {
+        # Приветственное сообщение
+        await manager.send_personal_message({
             "type": "system",
             "content": f"Добро пожаловать в комнату {room}!",
-            "client_id": client_id,
-            "timestamp": datetime.now().isoformat(),
-            "room": room
-        }
-        await manager.send_personal_message(welcome_message, client_id)
+            "timestamp": datetime.now().isoformat()
+        }, client_id)
 
-        user_joined = {
+        # Уведомление о новом пользователе
+        await manager.broadcast_to_room({
             "type": "system",
             "content": f"Пользователь {client_id} присоединился к чату",
-            "client_id": client_id,
-            "timestamp": datetime.now().isoformat(),
-            "room": room
-        }
-        await manager.broadcast_to_room(user_joined, room, exclude=client_id)
+            "timestamp": datetime.now().isoformat()
+        }, room, exclude=client_id)
 
         while True:
-            try:
-                data = await websocket.receive_text()
-                message = json.loads(data)
+            data = await websocket.receive_text()
+            message = json.loads(data)
 
-                message["client_id"] = client_id
-                message["room"] = room
-                message["timestamp"] = datetime.now().isoformat()
+            message["client_id"] = client_id
+            message["room"] = room
+            message["timestamp"] = datetime.now().isoformat()
 
-                if message.get("type") == "private":
-                    target_client = message.get("target")
-                    private_message = {
-                        "type": "private",
-                        "content": message.get("content", ""),
-                        "from": client_id,
-                        "timestamp": message["timestamp"]
-                    }
-                    await manager.send_personal_message(private_message, target_client)
-
-                    await manager.send_personal_message({
-                        "type": "private_sent",
-                        "content": message.get("content", ""),
-                        "to": target_client,
-                        "timestamp": message["timestamp"]
-                    }, client_id)
-
-                else:
-                    chat_message = {
-                        "type": "chat",
-                        "content": message.get("content", ""),
-                        "client_id": client_id,
-                        "timestamp": message["timestamp"],
-                        "room": room
-                    }
-                    await manager.broadcast_to_room(chat_message, room)
-
-            except json.JSONDecodeError:
-                text_message = {
-                    "type": "chat",
-                    "content": data,
-                    "client_id": client_id,
-                    "timestamp": datetime.now().isoformat(),
-                    "room": room
-                }
-                await manager.broadcast_to_room(text_message, room)
+            await manager.broadcast_to_room({
+                "type": "chat",
+                "content": message.get("content", ""),
+                "client_id": client_id,
+                "timestamp": message["timestamp"]
+            }, room)
 
     except WebSocketDisconnect:
         manager.disconnect(client_id, room)
-
-        user_left = {
+        await manager.broadcast_to_room({
             "type": "system",
             "content": f"Пользователь {client_id} покинул чат",
-            "client_id": client_id,
-            "timestamp": datetime.now().isoformat(),
-            "room": room
-        }
-        await manager.broadcast_to_room(user_left, room)
-
+            "timestamp": datetime.now().isoformat()
+        }, room)
     except Exception as e:
-        print(f"Ошибка: {e}")
+        logger.error(f"WebSocket error: {e}")
         manager.disconnect(client_id, room)
 
 
 @app.websocket("/ws/webrtc/{room}/{client_id}")
-async def webrtc_signaling(
-        websocket: WebSocket,
-        room: str,
-        client_id: str
-):
+async def webrtc_signaling(websocket: WebSocket, room: str, client_id: str):
     try:
         await webrtc_manager.connect(websocket, room, client_id)
 
         while True:
-            try:
-                data = await websocket.receive_text()
-                message = json.loads(data)
+            data = await websocket.receive_text()
+            message = json.loads(data)
 
-                if message.get("target"):
-                    target_client = message["target"]
-                    message["from"] = client_id
-
-                    success = await webrtc_manager.send_to_client(room, target_client, message)
-                    if not success:
-                        print(f"WebRTC: Не удалось отправить сообщение от {client_id} к {target_client}")
-
-            except json.JSONDecodeError:
-                print(f"WebRTC: Получен некорректный JSON от {client_id}")
+            if message.get("target"):
+                target = message["target"]
+                message["from"] = client_id
+                await webrtc_manager.send_to_client(room, target, message)
 
     except WebSocketDisconnect:
         webrtc_manager.disconnect(room, client_id)
-
     except Exception as e:
-        print(f"WebRTC ошибка: {e}")
+        logger.error(f"WebRTC error: {e}")
         webrtc_manager.disconnect(room, client_id)
 
 
@@ -922,9 +1208,4 @@ if __name__ == "__main__":
     import uvicorn
 
     port = int(os.getenv("PORT", 8000))
-    uvicorn.run(
-        app,
-        host="0.0.0.0",
-        port=port,
-        reload=ENVIRONMENT == "development"
-    )
+    uvicorn.run(app, host="0.0.0.0", port=port)
