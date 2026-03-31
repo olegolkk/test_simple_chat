@@ -1,0 +1,35 @@
+version: '3.8'
+
+services:
+  chat-app:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - ENVIRONMENT=production
+      - ALLOWED_HOSTS=localhost,your-domain.com
+      - ALLOWED_ORIGINS=https://your-domain.com
+    restart: unless-stopped
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - chat-network
+
+  # Опционально: Nginx для проксирования
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf
+      - ./ssl:/etc/nginx/ssl
+    depends_on:
+      - chat-app
+    networks:
+      - chat-network
+    restart: unless-stopped
+
+networks:
+  chat-network:
+    driver: bridge
