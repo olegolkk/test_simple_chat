@@ -13,7 +13,7 @@ webrtc_manager = WebRTCManager()
 @router.get("/")
 async def get_root() -> HTMLResponse:
     """Главная страница"""
-    with open("templates/index.html", "r", encoding="utf-8") as f:
+    with open("app/templates/index.html", "r", encoding="utf-8") as f:
         html_content = f.read()
     return HTMLResponse(html_content)
 
