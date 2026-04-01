@@ -10,13 +10,12 @@ manager = ConnectionManager()
 webrtc_manager = WebRTCManager()
 
 
-@websocket_router.websocket("/ws/{room}")
+@websocket_router.websocket("/ws")
 async def websocket_endpoint(
         websocket: WebSocket,
-        room: str = "general",
         token: str = Query(None)
 ) -> None:
-    """WebSocket эндпоинт для чата с аутентификацией"""
+    """WebSocket эндпоинт для личных чатов"""
 
     # Проверяем токен
     try:
@@ -25,7 +24,7 @@ async def websocket_endpoint(
             await websocket.close(code=1008, reason="Authentication required")
             return
 
-        client_id = user["username"]
+        user_id = user["username"]
 
     except Exception as e:
         await websocket.close(code=1008, reason="Invalid token")
@@ -33,32 +32,24 @@ async def websocket_endpoint(
         return
 
     try:
-        await manager.connect(websocket, client_id, room)
+        await manager.connect(websocket, user_id)
 
         # Отправляем приветственное сообщение
         await manager.send_personal_message({
             "type": "system",
-            "content": f"Добро пожаловать в комнату {room}, {client_id}!",
+            "content": f"Добро пожаловать, {user_id}!",
             "timestamp": datetime.now().isoformat()
-        }, client_id)
+        }, user_id)
 
-        # Отправляем текущий список пользователей новому клиенту
-        users_in_room = manager.get_room_users(room)
-        await manager.send_personal_message({
-            "type": "users_list",
-            "users": users_in_room,
-            "timestamp": datetime.now().isoformat()
-        }, client_id)
+        # Отправляем список онлайн пользователей
+        await broadcast_online_users()
 
-        # Уведомляем всех в комнате о новом пользователе
-        await manager.broadcast_to_room({
+        # Уведомляем всех о новом пользователе
+        await broadcast_to_all({
             "type": "system",
-            "content": f"Пользователь {client_id} присоединился к чату",
+            "content": f"Пользователь {user_id} вошел в чат",
             "timestamp": datetime.now().isoformat()
-        }, room, exclude=client_id)
-
-        # Отправляем обновленный список пользователей всем в комнате
-        await broadcast_users_list(room)
+        }, exclude=user_id)
 
         while True:
             data = await websocket.receive_text()
@@ -67,51 +58,71 @@ async def websocket_endpoint(
             message_type = message.get("type")
 
             if message_type == "chat":
+                # Личное сообщение
+                target_user = message.get("target")
                 content = message.get("content", "")
 
-                # Отправляем сообщение всем в комнате
-                await manager.broadcast_to_room({
-                    "type": "chat",
-                    "content": content,
-                    "client_id": client_id,
-                    "timestamp": datetime.now().isoformat()
-                }, room)
+                if target_user:
+                    # Отправляем отправителю подтверждение
+                    await manager.send_personal_message({
+                        "type": "chat",
+                        "content": content,
+                        "from": user_id,
+                        "to": target_user,
+                        "timestamp": datetime.now().isoformat(),
+                        "is_own": True
+                    }, user_id)
 
-            elif message_type == "webrtc_offer" or message_type == "webrtc_answer" or message_type == "webrtc_ice":
-                # Перенаправляем WebRTC сигналы через WebRTC менеджер
+                    # Отправляем получателю
+                    success = await manager.send_personal_message({
+                        "type": "chat",
+                        "content": content,
+                        "from": user_id,
+                        "to": target_user,
+                        "timestamp": datetime.now().isoformat()
+                    }, target_user)
+
+                    if not success:
+                        await manager.send_personal_message({
+                            "type": "system",
+                            "content": f"Пользователь {target_user} не в сети",
+                            "timestamp": datetime.now().isoformat()
+                        }, user_id)
+
+            elif message_type in ["webrtc_offer", "webrtc_answer", "webrtc_ice"]:
+                # Перенаправляем WebRTC сигналы
                 target = message.get("target")
                 if target:
-                    await webrtc_manager.send_to_client(room, target, {
+                    await webrtc_manager.send_to_user(target, {
                         "type": message_type,
-                        "from": client_id,
+                        "from": user_id,
                         "data": message.get("data")
                     })
 
     except WebSocketDisconnect:
-        manager.disconnect(client_id, room)
+        manager.disconnect(user_id)
 
-        # Уведомляем всех в комнате о выходе пользователя
-        await manager.broadcast_to_room({
+        # Уведомляем всех о выходе пользователя
+        await broadcast_to_all({
             "type": "system",
-            "content": f"Пользователь {client_id} покинул чат",
+            "content": f"Пользователь {user_id} покинул чат",
             "timestamp": datetime.now().isoformat()
-        }, room)
+        })
 
-        # Отправляем обновленный список пользователей всем в комнате
-        await broadcast_users_list(room)
+        # Обновляем список онлайн пользователей
+        await broadcast_online_users()
 
     except Exception as e:
         logger.error(f"WebSocket error: {e}")
-        manager.disconnect(client_id, room)
+        manager.disconnect(user_id)
 
 
-@websocket_router.websocket("/ws/webrtc/{room}")
+@websocket_router.websocket("/ws/webrtc")
 async def webrtc_signaling(
         websocket: WebSocket,
-        room: str,
         token: str = Query(None)
 ) -> None:
-    """WebSocket эндпоинт для WebRTC сигналинга с аутентификацией"""
+    """WebSocket эндпоинт для WebRTC сигналинга"""
 
     # Проверяем токен
     try:
@@ -120,7 +131,7 @@ async def webrtc_signaling(
             await websocket.close(code=1008, reason="Authentication required")
             return
 
-        client_id = user["username"]
+        user_id = user["username"]
 
     except Exception as e:
         await websocket.close(code=1008, reason="Invalid token")
@@ -128,7 +139,7 @@ async def webrtc_signaling(
         return
 
     try:
-        await webrtc_manager.connect(websocket, room, client_id)
+        await webrtc_manager.connect(websocket, user_id)
 
         while True:
             data = await websocket.receive_text()
@@ -136,21 +147,31 @@ async def webrtc_signaling(
 
             if message.get("target"):
                 target = message["target"]
-                message["from"] = client_id
-                await webrtc_manager.send_to_client(room, target, message)
+                message["from"] = user_id
+                await webrtc_manager.send_to_user(target, message)
 
     except WebSocketDisconnect:
-        webrtc_manager.disconnect(room, client_id)
+        webrtc_manager.disconnect(user_id)
     except Exception as e:
         logger.error(f"WebRTC error: {e}")
-        webrtc_manager.disconnect(room, client_id)
+        webrtc_manager.disconnect(user_id)
 
 
-async def broadcast_users_list(room: str):
-    """Отправляет обновленный список пользователей всем в комнате"""
-    users_in_room = manager.get_room_users(room)
-    await manager.broadcast_to_room({
+async def broadcast_online_users():
+    """Отправляет список онлайн пользователей всем"""
+    online_users = manager.get_online_users()
+    await broadcast_to_all({
         "type": "users_list",
-        "users": users_in_room,
+        "users": online_users,
         "timestamp": datetime.now().isoformat()
-    }, room)
+    })
+
+
+async def broadcast_to_all(message: dict, exclude: str = None):
+    """Отправляет сообщение всем онлайн пользователям"""
+    for user_id, ws in manager.active_connections.items():
+        if user_id != exclude:
+            try:
+                await ws.send_json(message)
+            except Exception as e:
+                logger.error(f"Error broadcasting to {user_id}: {e}")

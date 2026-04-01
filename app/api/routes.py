@@ -36,21 +36,7 @@ async def get_users():
     return UserCRUD.get_all_users()
 
 
-@router.get("/rooms")
-async def get_rooms():
-    """Получить список комнат"""
-    return {
-        "rooms": list(connection_manager.rooms.keys()),
-        "room_details": {
-            room: {
-                "clients_count": len(clients),
-                "clients": list(clients)
-            } for room, clients in connection_manager.rooms.items()
-        }
-    }
-
-
-@router.get("/webrtc/rooms")
-async def get_webrtc_rooms():
-    """Получить список WebRTC комнат"""
-    return webrtc_manager.get_rooms_info()
+@router.get("/online")
+async def get_online_users():
+    """Получить список онлайн пользователей"""
+    return {"online_users": connection_manager.get_online_users()}

@@ -1,74 +1,46 @@
-from typing import Dict, Set, List, Optional
+from typing import Dict, Optional
 from fastapi import WebSocket
 from app.utils.logger import logger
 
 
 class ConnectionManager:
-    """Менеджер WebSocket соединений для чата"""
+    """Менеджер WebSocket соединений для личных чатов"""
 
     def __init__(self):
+        # Храним активные соединения: user_id -> websocket
         self.active_connections: Dict[str, WebSocket] = {}
-        self.rooms: Dict[str, Set[str]] = {}
 
-    async def connect(self, websocket: WebSocket, client_id: str, room: str = "general") -> str:
-        """Подключение клиента к комнате"""
+    async def connect(self, websocket: WebSocket, user_id: str) -> str:
+        """Подключение пользователя"""
         await websocket.accept()
-        self.active_connections[client_id] = websocket
+        self.active_connections[user_id] = websocket
+        logger.info(f"User {user_id} connected")
+        return user_id
 
-        if room not in self.rooms:
-            self.rooms[room] = set()
-        self.rooms[room].add(client_id)
+    def disconnect(self, user_id: str) -> None:
+        """Отключение пользователя"""
+        if user_id in self.active_connections:
+            del self.active_connections[user_id]
+            logger.info(f"User {user_id} disconnected")
 
-        logger.info(f"Client {client_id} connected to room {room}")
-        return client_id
-
-    def disconnect(self, client_id: str, room: str = "general") -> None:
-        """Отключение клиента от комнаты"""
-        if client_id in self.active_connections:
-            del self.active_connections[client_id]
-
-        if room in self.rooms and client_id in self.rooms[room]:
-            self.rooms[room].remove(client_id)
-            if not self.rooms[room]:
-                del self.rooms[room]
-
-        logger.info(f"Client {client_id} disconnected from room {room}")
-
-    async def send_personal_message(self, message: dict, client_id: str) -> None:
-        """Отправка личного сообщения клиенту"""
-        if client_id in self.active_connections:
+    async def send_personal_message(self, message: dict, user_id: str) -> bool:
+        """Отправка личного сообщения"""
+        if user_id in self.active_connections:
             try:
-                await self.active_connections[client_id].send_json(message)
+                await self.active_connections[user_id].send_json(message)
+                return True
             except Exception as e:
-                logger.error(f"Error sending message to {client_id}: {e}")
+                logger.error(f"Error sending message to {user_id}: {e}")
+        return False
 
-    async def broadcast_to_room(
-            self,
-            message: dict,
-            room: str = "general",
-            exclude: Optional[str] = None
-    ) -> None:
-        """Отправка сообщения всем в комнате"""
-        if room in self.rooms:
-            for client_id in self.rooms[room]:
-                if client_id != exclude and client_id in self.active_connections:
-                    try:
-                        await self.active_connections[client_id].send_json(message)
-                    except Exception as e:
-                        logger.error(f"Error broadcasting to {client_id}: {e}")
+    async def send_to_user(self, message: dict, user_id: str) -> bool:
+        """Отправка сообщения пользователю"""
+        return await self.send_personal_message(message, user_id)
 
-    def get_room_users(self, room: str) -> List[str]:
-        """Получение списка пользователей в комнате"""
-        if room in self.rooms:
-            return list(self.rooms[room])
-        return []
+    def get_online_users(self) -> list:
+        """Получение списка онлайн пользователей"""
+        return list(self.active_connections.keys())
 
-    def get_stats(self) -> dict:
-        """Получение статистики"""
-        return {
-            "total_connections": len(self.active_connections),
-            "active_rooms": len(self.rooms),
-            "rooms_details": {
-                room: len(clients) for room, clients in self.rooms.items()
-            }
-        }
+    def is_online(self, user_id: str) -> bool:
+        """Проверка, онлайн ли пользователь"""
+        return user_id in self.active_connections
