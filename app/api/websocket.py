@@ -2,7 +2,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
 import json
 from datetime import datetime
 from app.managers import ConnectionManager
-from app.auth.dependencies import get_current_user_optional
+from app.auth.auth import AuthHandler
 from app.utils.logger import logger
 
 websocket_router = APIRouter()
@@ -19,7 +19,6 @@ async def websocket_endpoint(
 
     # Проверяем токен
     try:
-        from app.auth.auth import AuthHandler
         user = AuthHandler.get_current_user(token) if token else None
         if not user:
             await websocket.close(code=1008, reason="Authentication required")
@@ -35,19 +34,30 @@ async def websocket_endpoint(
     try:
         await manager.connect(websocket, client_id, room)
 
-        # Приветственное сообщение
+        # Отправляем приветственное сообщение
         await manager.send_personal_message({
             "type": "system",
             "content": f"Добро пожаловать в комнату {room}, {client_id}!",
             "timestamp": datetime.now().isoformat()
         }, client_id)
 
-        # Уведомление о новом пользователе
+        # Отправляем текущий список пользователей новому клиенту
+        users_in_room = manager.get_room_users(room)
+        await manager.send_personal_message({
+            "type": "users_list",
+            "users": users_in_room,
+            "timestamp": datetime.now().isoformat()
+        }, client_id)
+
+        # Уведомляем всех в комнате о новом пользователе
         await manager.broadcast_to_room({
             "type": "system",
             "content": f"Пользователь {client_id} присоединился к чату",
             "timestamp": datetime.now().isoformat()
         }, room, exclude=client_id)
+
+        # Отправляем обновленный список пользователей всем в комнате
+        await broadcast_users_list(room)
 
         while True:
             data = await websocket.receive_text()
@@ -69,11 +79,26 @@ async def websocket_endpoint(
     except WebSocketDisconnect:
         manager.disconnect(client_id, room)
 
+        # Уведомляем всех в комнате о выходе пользователя
         await manager.broadcast_to_room({
             "type": "system",
             "content": f"Пользователь {client_id} покинул чат",
             "timestamp": datetime.now().isoformat()
         }, room)
+
+        # Отправляем обновленный список пользователей всем в комнате
+        await broadcast_users_list(room)
+
     except Exception as e:
         logger.error(f"WebSocket error: {e}")
         manager.disconnect(client_id, room)
+
+
+async def broadcast_users_list(room: str):
+    """Отправляет обновленный список пользователей всем в комнате"""
+    users_in_room = manager.get_room_users(room)
+    await manager.broadcast_to_room({
+        "type": "users_list",
+        "users": users_in_room,
+        "timestamp": datetime.now().isoformat()
+    }, room)

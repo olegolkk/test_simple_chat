@@ -204,12 +204,25 @@
 
         .message {
             margin-bottom: 15px;
+            animation: fadeIn 0.3s;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
         }
 
         .message.system {
             text-align: center;
             color: #7f8c8d;
             font-size: 12px;
+            font-style: italic;
         }
 
         .message-header {
@@ -233,6 +246,7 @@
             border-radius: 12px;
             display: inline-block;
             max-width: 70%;
+            word-wrap: break-word;
         }
 
         .message.own {
@@ -260,6 +274,11 @@
             font-size: 14px;
         }
 
+        .input-area input:focus {
+            outline: none;
+            border-color: #3498db;
+        }
+
         .input-area button {
             padding: 12px 24px;
             background: #3498db;
@@ -267,12 +286,26 @@
             border: none;
             border-radius: 25px;
             cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .input-area button:hover {
+            background: #2980b9;
+            transform: scale(1.05);
         }
 
         .status {
             padding: 8px 20px;
             background: #ecf0f1;
             font-size: 12px;
+            color: #2c3e50;
+            border-top: 1px solid #ddd;
+        }
+
+        .online-count {
+            font-size: 11px;
+            color: #1abc9c;
+            margin-top: 5px;
         }
     </style>
 </head>
@@ -333,6 +366,7 @@
             <div class="user-info">
                 <h3>Пользователь</h3>
                 <div class="username" id="username"></div>
+                <div class="online-count" id="onlineCount">👥 0 онлайн</div>
                 <button class="logout-btn" onclick="logout()">Выйти</button>
             </div>
             <div class="rooms-section">
@@ -384,6 +418,7 @@
         const statusDiv = document.getElementById('status');
         const usersListDiv = document.getElementById('usersList');
         const usernameSpan = document.getElementById('username');
+        const onlineCountSpan = document.getElementById('onlineCount');
 
         // Показ форм
         function showLogin() {
@@ -478,8 +513,6 @@
             usernameSpan.textContent = currentUser.username;
 
             connectWebSocket();
-            fetchUsers();
-            setInterval(fetchUsers, 5000);
 
             sendBtn.addEventListener('click', sendMessage);
             messageInput.addEventListener('keypress', (e) => {
@@ -496,9 +529,14 @@
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             const url = `${protocol}//${window.location.host}/ws/${currentRoom}?token=${token}`;
 
+            if (ws) {
+                ws.close();
+            }
+
             ws = new WebSocket(url);
 
             ws.onopen = () => {
+                console.log('WebSocket connected');
                 statusDiv.innerHTML = '✅ Подключен к чату';
                 statusDiv.style.background = '#d4edda';
                 statusDiv.style.color = '#155724';
@@ -510,10 +548,15 @@
             };
 
             ws.onclose = () => {
+                console.log('WebSocket disconnected');
                 statusDiv.innerHTML = '❌ Отключен. Переподключение...';
                 statusDiv.style.background = '#f8d7da';
                 statusDiv.style.color = '#721c24';
                 setTimeout(connectWebSocket, 3000);
+            };
+
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
             };
         }
 
@@ -526,6 +569,9 @@
                 case 'chat':
                     addChatMessage(message.client_id, message.content, message.timestamp);
                     break;
+                case 'users_list':
+                    updateUsersList(message.users);
+                    break;
             }
         }
 
@@ -533,10 +579,11 @@
             const messageDiv = document.createElement('div');
             messageDiv.className = `message ${sender === currentUser.username ? 'own' : ''}`;
             const time = timestamp ? new Date(timestamp).toLocaleTimeString() : new Date().toLocaleTimeString();
+            const senderName = sender === currentUser.username ? 'Вы' : escapeHtml(sender);
 
             messageDiv.innerHTML = `
                 <div class="message-header">
-                    <span class="message-sender">${escapeHtml(sender)}</span>
+                    <span class="message-sender">${senderName}</span>
                     <span class="message-time">${time}</span>
                 </div>
                 <div class="message-content">${escapeHtml(content)}</div>
@@ -562,22 +609,10 @@
             messageInput.value = '';
         }
 
-        async function fetchUsers() {
-            try {
-                const response = await fetch('/rooms');
-                const data = await response.json();
-
-                if (data.room_details && data.room_details[currentRoom]) {
-                    const users = data.room_details[currentRoom].clients || [];
-                    updateUsersList(users);
-                }
-            } catch (error) {
-                console.error('Error fetching users:', error);
-            }
-        }
-
         function updateUsersList(users) {
             if (!usersListDiv) return;
+
+            onlineCountSpan.textContent = `👥 ${users.length} онлайн`;
 
             if (users.length === 0) {
                 usersListDiv.innerHTML = '<div style="color: #95a5a6;">Нет пользователей</div>';
@@ -601,20 +636,21 @@
             currentRoom = room;
             document.getElementById('currentRoom').textContent = room;
 
+            // Очищаем сообщения
             messagesDiv.innerHTML = '';
             addSystemMessage(`Переход в комнату ${room}...`);
 
+            // Переподключаемся к новой комнате
             if (ws) ws.close();
             setTimeout(connectWebSocket, 100);
 
+            // Обновляем активную комнату в UI
             document.querySelectorAll('.room-item').forEach(item => {
                 item.classList.remove('active');
                 if (item.dataset.room === room) {
                     item.classList.add('active');
                 }
             });
-
-            setTimeout(fetchUsers, 1000);
         }
 
         function logout() {
