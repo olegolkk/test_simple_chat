@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WebSocket + WebRTC Чат</title>
+    <title>Чат с аутентификацией</title>
     <style>
         * {
             margin: 0;
@@ -14,17 +14,96 @@
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            height: 100vh;
-            overflow: hidden;
+            min-height: 100vh;
         }
 
-        .container {
+        /* Формы авторизации */
+        .auth-container {
             display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .auth-box {
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            width: 100%;
+            max-width: 400px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+        }
+
+        .auth-box h2 {
+            margin-bottom: 30px;
+            color: #2c3e50;
+            text-align: center;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: #3498db;
+        }
+
+        .btn {
+            width: 100%;
+            padding: 12px;
+            background: #3498db;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn:hover {
+            background: #2980b9;
+            transform: translateY(-2px);
+        }
+
+        .switch-form {
+            text-align: center;
+            margin-top: 20px;
+            color: #7f8c8d;
+        }
+
+        .switch-form a {
+            color: #3498db;
+            text-decoration: none;
+            cursor: pointer;
+        }
+
+        .error-message {
+            background: #e74c3c;
+            color: white;
+            padding: 10px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        /* Чат */
+        .chat-container {
+            display: none;
             height: 100vh;
             max-width: 1400px;
             margin: 0 auto;
             background: white;
-            box-shadow: 0 0 20px rgba(0,0,0,0.1);
         }
 
         .sidebar {
@@ -38,33 +117,35 @@
         .user-info {
             padding: 20px;
             background: #34495e;
-            border-bottom: 1px solid #3e5a6f;
         }
 
         .user-info h3 {
-            margin-bottom: 10px;
             font-size: 14px;
             opacity: 0.8;
+            margin-bottom: 10px;
         }
 
-        .user-id {
-            background: #1abc9c;
+        .username {
+            font-size: 16px;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .logout-btn {
+            background: #e74c3c;
+            color: white;
+            border: none;
             padding: 8px 12px;
             border-radius: 6px;
-            font-family: monospace;
+            cursor: pointer;
+            margin-top: 10px;
             font-size: 12px;
-            word-break: break-all;
+            width: 100%;
         }
 
         .rooms-section {
             flex: 1;
             padding: 20px;
-        }
-
-        .rooms-section h3 {
-            margin-bottom: 15px;
-            font-size: 14px;
-            opacity: 0.8;
         }
 
         .room-item {
@@ -76,14 +157,8 @@
             transition: all 0.3s;
         }
 
-        .room-item:hover {
-            background: #1abc9c;
-            transform: translateX(5px);
-        }
-
-        .room-item.active {
-            background: #1abc9c;
-            border-left: 3px solid #fff;
+        .room-item:hover, .room-item.active {
+            background: #3498db;
         }
 
         .users-list {
@@ -95,7 +170,6 @@
         .users-list h3 {
             margin-bottom: 10px;
             font-size: 14px;
-            opacity: 0.8;
         }
 
         .user-item {
@@ -104,29 +178,6 @@
             background: #34495e;
             border-radius: 4px;
             font-size: 12px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .call-btn {
-            background: #1abc9c;
-            border: none;
-            color: white;
-            padding: 4px 10px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 10px;
-            transition: all 0.3s;
-        }
-
-        .call-btn:hover {
-            background: #16a085;
-            transform: scale(1.05);
-        }
-
-        .call-btn.active-call {
-            background: #e74c3c;
         }
 
         .chat-area {
@@ -136,89 +187,12 @@
         }
 
         .chat-header {
-            background: white;
             padding: 20px;
             border-bottom: 1px solid #e0e0e0;
         }
 
         .chat-header h2 {
             color: #2c3e50;
-            font-size: 20px;
-        }
-
-        .chat-header p {
-            color: #7f8c8d;
-            font-size: 12px;
-            margin-top: 5px;
-        }
-
-        .video-area {
-            background: #1a1a2e;
-            padding: 20px;
-            display: none;
-        }
-
-        .video-area.active {
-            display: block;
-        }
-
-        .videos-container {
-            display: flex;
-            gap: 20px;
-            flex-wrap: wrap;
-        }
-
-        .video-wrapper {
-            flex: 1;
-            min-width: 300px;
-            position: relative;
-            background: #16213e;
-            border-radius: 12px;
-            overflow: hidden;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
-        }
-
-        .video-wrapper video {
-            width: 100%;
-            background: #0f0f1f;
-            border-radius: 12px;
-            transform: scaleX(-1);
-        }
-
-        .video-label {
-            position: absolute;
-            bottom: 10px;
-            left: 10px;
-            background: rgba(0,0,0,0.7);
-            color: white;
-            padding: 4px 12px;
-            border-radius: 20px;
-            font-size: 12px;
-            backdrop-filter: blur(5px);
-        }
-
-        .call-controls {
-            margin-top: 15px;
-            display: flex;
-            gap: 10px;
-            justify-content: center;
-        }
-
-        .call-btn-large {
-            background: #e74c3c;
-            color: white;
-            border: none;
-            padding: 10px 24px;
-            border-radius: 25px;
-            cursor: pointer;
-            font-size: 14px;
-            font-weight: bold;
-            transition: all 0.3s;
-        }
-
-        .call-btn-large:hover {
-            background: #c0392b;
-            transform: scale(1.05);
         }
 
         .messages-area {
@@ -230,25 +204,12 @@
 
         .message {
             margin-bottom: 15px;
-            animation: fadeIn 0.3s;
-        }
-
-        @keyframes fadeIn {
-            from {
-                opacity: 0;
-                transform: translateY(10px);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
         }
 
         .message.system {
             text-align: center;
             color: #7f8c8d;
             font-size: 12px;
-            font-style: italic;
         }
 
         .message-header {
@@ -272,8 +233,6 @@
             border-radius: 12px;
             display: inline-block;
             max-width: 70%;
-            word-wrap: break-word;
-            box-shadow: 0 1px 2px rgba(0,0,0,0.1);
         }
 
         .message.own {
@@ -299,12 +258,6 @@
             border: 1px solid #ddd;
             border-radius: 25px;
             font-size: 14px;
-            outline: none;
-            transition: border-color 0.3s;
-        }
-
-        .input-area input:focus {
-            border-color: #3498db;
         }
 
         .input-area button {
@@ -314,89 +267,73 @@
             border: none;
             border-radius: 25px;
             cursor: pointer;
-            font-size: 14px;
-            transition: all 0.3s;
-        }
-
-        .input-area button:hover {
-            background: #2980b9;
-            transform: scale(1.05);
         }
 
         .status {
             padding: 8px 20px;
             background: #ecf0f1;
             font-size: 12px;
-            color: #2c3e50;
-            border-top: 1px solid #ddd;
-        }
-
-        .online-count {
-            font-size: 11px;
-            color: #1abc9c;
-            margin-top: 5px;
-        }
-
-        .incoming-call {
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            background: white;
-            padding: 15px 20px;
-            border-radius: 12px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-            z-index: 1000;
-            animation: slideIn 0.3s;
-        }
-
-        @keyframes slideIn {
-            from {
-                transform: translateX(100%);
-            }
-            to {
-                transform: translateX(0);
-            }
-        }
-
-        .incoming-call button {
-            margin-left: 10px;
-            padding: 5px 15px;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-        }
-
-        .accept-call {
-            background: #2ecc71;
-            color: white;
-        }
-
-        .reject-call {
-            background: #e74c3c;
-            color: white;
-        }
-
-        .mic-control {
-            position: absolute;
-            bottom: 10px;
-            right: 10px;
-            background: rgba(0,0,0,0.7);
-            border: none;
-            color: white;
-            padding: 5px 10px;
-            border-radius: 20px;
-            cursor: pointer;
-            font-size: 12px;
         }
     </style>
 </head>
 <body>
-    <div class="container">
+    <!-- Форма авторизации -->
+    <div id="authContainer" class="auth-container">
+        <div class="auth-box">
+            <h2>Вход в чат</h2>
+            <div id="authError" class="error-message" style="display: none;"></div>
+
+            <form id="loginForm">
+                <div class="form-group">
+                    <input type="text" id="loginUsername" placeholder="Имя пользователя" required>
+                </div>
+                <div class="form-group">
+                    <input type="password" id="loginPassword" placeholder="Пароль" required>
+                </div>
+                <button type="submit" class="btn">Войти</button>
+            </form>
+
+            <div class="switch-form">
+                Нет аккаунта? <a onclick="showRegister()">Зарегистрироваться</a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Форма регистрации -->
+    <div id="registerContainer" class="auth-container" style="display: none;">
+        <div class="auth-box">
+            <h2>Регистрация</h2>
+            <div id="registerError" class="error-message" style="display: none;"></div>
+
+            <form id="registerForm">
+                <div class="form-group">
+                    <input type="text" id="regUsername" placeholder="Имя пользователя" required>
+                </div>
+                <div class="form-group">
+                    <input type="email" id="regEmail" placeholder="Email" required>
+                </div>
+                <div class="form-group">
+                    <input type="password" id="regPassword" placeholder="Пароль" required>
+                </div>
+                <div class="form-group">
+                    <input type="password" id="regConfirmPassword" placeholder="Подтвердите пароль" required>
+                </div>
+                <button type="submit" class="btn">Зарегистрироваться</button>
+            </form>
+
+            <div class="switch-form">
+                Уже есть аккаунт? <a onclick="showLogin()">Войти</a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Чат -->
+    <div id="chatContainer" class="chat-container">
         <div class="sidebar">
             <div class="user-info">
-                <h3>Ваш ID</h3>
-                <div class="user-id" id="clientId">Загрузка...</div>
-                <div class="online-count" id="onlineCount">👥 0 онлайн</div>
+                <h3>Пользователь</h3>
+                <div class="username" id="username"></div>
+                <button class="logout-btn" onclick="logout()">Выйти</button>
             </div>
             <div class="rooms-section">
                 <h3>Комнаты</h3>
@@ -414,19 +351,11 @@
         <div class="chat-area">
             <div class="chat-header">
                 <h2 id="currentRoom">general</h2>
-                <p>WebSocket + WebRTC Чат | Видеозвонки</p>
-            </div>
-
-            <div class="video-area" id="videoArea">
-                <div class="videos-container" id="videosContainer"></div>
-                <div class="call-controls">
-                    <button class="call-btn-large" id="endCallBtn" style="display: none;">🔴 Завершить звонок</button>
-                </div>
             </div>
 
             <div class="messages-area" id="messages">
                 <div class="message system">
-                    <div class="message-content">💬 Добро пожаловать в чат! Нажмите 📞 для видеозвонка</div>
+                    <div class="message-content">Добро пожаловать в чат!</div>
                 </div>
             </div>
 
@@ -435,109 +364,161 @@
                 <button id="sendBtn">Отправить</button>
             </div>
 
-            <div class="status" id="status">🟡 Подключение к серверу...</div>
+            <div class="status" id="status">🟡 Подключение...</div>
         </div>
     </div>
 
     <script>
-        // Глобальные переменные
         let ws = null;
-        let webrtcWs = null;
-        let clientId = localStorage.getItem('clientId') || 'user_' + Math.random().toString(36).substr(2, 8);
+        let token = null;
+        let currentUser = null;
         let currentRoom = 'general';
 
-        // WebRTC переменные
-        let localStream = null;
-        let peerConnections = new Map();
-        let activeCall = null;
-        let pendingOffer = null;
-
         // DOM элементы
+        const authContainer = document.getElementById('authContainer');
+        const registerContainer = document.getElementById('registerContainer');
+        const chatContainer = document.getElementById('chatContainer');
         const messagesDiv = document.getElementById('messages');
         const messageInput = document.getElementById('messageInput');
         const sendBtn = document.getElementById('sendBtn');
         const statusDiv = document.getElementById('status');
-        const currentRoomSpan = document.getElementById('currentRoom');
         const usersListDiv = document.getElementById('usersList');
-        const onlineCountSpan = document.getElementById('onlineCount');
-        const videoArea = document.getElementById('videoArea');
-        const endCallBtn = document.getElementById('endCallBtn');
-        const videosContainer = document.getElementById('videosContainer');
+        const usernameSpan = document.getElementById('username');
 
-        // Сохраняем ID
-        localStorage.setItem('clientId', clientId);
-        document.getElementById('clientId').textContent = clientId;
+        // Показ форм
+        function showLogin() {
+            authContainer.style.display = 'flex';
+            registerContainer.style.display = 'none';
+        }
 
-        // Получение WebSocket URL
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${protocol}//${window.location.host}`;
+        function showRegister() {
+            authContainer.style.display = 'none';
+            registerContainer.style.display = 'flex';
+        }
 
-        console.log('Client ID:', clientId);
+        // Обработка входа
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const username = document.getElementById('loginUsername').value;
+            const password = document.getElementById('loginPassword').value;
 
-        // Подключение к WebSocket чата
+            try {
+                const response = await fetch('/auth/login', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({username, password})
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    token = data.access_token;
+                    currentUser = data.user;
+                    localStorage.setItem('token', token);
+                    localStorage.setItem('user', JSON.stringify(currentUser));
+                    initChat();
+                } else {
+                    showError('authError', data.detail || 'Ошибка входа');
+                }
+            } catch (error) {
+                showError('authError', 'Ошибка подключения к серверу');
+            }
+        });
+
+        // Обработка регистрации
+        document.getElementById('registerForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const username = document.getElementById('regUsername').value;
+            const email = document.getElementById('regEmail').value;
+            const password = document.getElementById('regPassword').value;
+            const confirmPassword = document.getElementById('regConfirmPassword').value;
+
+            if (password !== confirmPassword) {
+                showError('registerError', 'Пароли не совпадают');
+                return;
+            }
+
+            try {
+                const response = await fetch('/auth/register', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({username, email, password})
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    token = data.access_token;
+                    currentUser = data.user;
+                    localStorage.setItem('token', token);
+                    localStorage.setItem('user', JSON.stringify(currentUser));
+                    initChat();
+                } else {
+                    showError('registerError', data.detail || 'Ошибка регистрации');
+                }
+            } catch (error) {
+                showError('registerError', 'Ошибка подключения к серверу');
+            }
+        });
+
+        function showError(elementId, message) {
+            const errorDiv = document.getElementById(elementId);
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+            setTimeout(() => {
+                errorDiv.style.display = 'none';
+            }, 3000);
+        }
+
+        // Инициализация чата
+        function initChat() {
+            authContainer.style.display = 'none';
+            registerContainer.style.display = 'none';
+            chatContainer.style.display = 'flex';
+            usernameSpan.textContent = currentUser.username;
+
+            connectWebSocket();
+            fetchUsers();
+            setInterval(fetchUsers, 5000);
+
+            sendBtn.addEventListener('click', sendMessage);
+            messageInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') sendMessage();
+            });
+
+            document.querySelectorAll('.room-item').forEach(item => {
+                item.addEventListener('click', () => changeRoom(item.dataset.room));
+            });
+        }
+
+        // Подключение WebSocket
         function connectWebSocket() {
-            const url = `${wsUrl}/ws/${clientId}/${currentRoom}`;
-            console.log('Connecting to chat WS:', url);
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const url = `${protocol}//${window.location.host}/ws/${currentRoom}?token=${token}`;
 
-            try {
-                ws = new WebSocket(url);
+            ws = new WebSocket(url);
 
-                ws.onopen = () => {
-                    console.log('✅ Chat WebSocket connected');
-                    statusDiv.innerHTML = '✅ Подключен к чату';
-                    statusDiv.style.background = '#d4edda';
-                    statusDiv.style.color = '#155724';
-                };
+            ws.onopen = () => {
+                statusDiv.innerHTML = '✅ Подключен к чату';
+                statusDiv.style.background = '#d4edda';
+                statusDiv.style.color = '#155724';
+            };
 
-                ws.onmessage = (event) => {
-                    const message = JSON.parse(event.data);
-                    handleChatMessage(message);
-                };
+            ws.onmessage = (event) => {
+                const message = JSON.parse(event.data);
+                handleMessage(message);
+            };
 
-                ws.onclose = () => {
-                    console.log('❌ Chat WebSocket disconnected');
-                    statusDiv.innerHTML = '❌ Отключен. Переподключение...';
-                    statusDiv.style.background = '#f8d7da';
-                    statusDiv.style.color = '#721c24';
-                    setTimeout(() => connectWebSocket(), 3000);
-                };
-
-                ws.onerror = (error) => {
-                    console.error('Chat WebSocket error:', error);
-                };
-            } catch (error) {
-                console.error('Error creating WebSocket:', error);
-            }
+            ws.onclose = () => {
+                statusDiv.innerHTML = '❌ Отключен. Переподключение...';
+                statusDiv.style.background = '#f8d7da';
+                statusDiv.style.color = '#721c24';
+                setTimeout(connectWebSocket, 3000);
+            };
         }
 
-        // Подключение к WebRTC сигналингу
-        function connectWebRTC() {
-            const url = `${wsUrl}/ws/webrtc/${currentRoom}/${clientId}`;
-            console.log('Connecting to WebRTC signaling:', url);
-
-            try {
-                webrtcWs = new WebSocket(url);
-
-                webrtcWs.onopen = () => {
-                    console.log('✅ WebRTC signaling connected');
-                };
-
-                webrtcWs.onmessage = async (event) => {
-                    const signal = JSON.parse(event.data);
-                    await handleWebRTCSignal(signal);
-                };
-
-                webrtcWs.onclose = () => {
-                    console.log('❌ WebRTC signaling disconnected');
-                    setTimeout(() => connectWebRTC(), 3000);
-                };
-            } catch (error) {
-                console.error('Error creating WebRTC WebSocket:', error);
-            }
-        }
-
-        // Обработка сообщений чата
-        function handleChatMessage(message) {
+        // Обработка сообщений
+        function handleMessage(message) {
             switch(message.type) {
                 case 'system':
                     addSystemMessage(message.content);
@@ -546,19 +527,16 @@
                     addChatMessage(message.client_id, message.content, message.timestamp);
                     break;
             }
-            fetchUsers();
         }
 
-        // Добавление сообщений
         function addChatMessage(sender, content, timestamp) {
             const messageDiv = document.createElement('div');
-            messageDiv.className = `message ${sender === clientId ? 'own' : ''}`;
+            messageDiv.className = `message ${sender === currentUser.username ? 'own' : ''}`;
             const time = timestamp ? new Date(timestamp).toLocaleTimeString() : new Date().toLocaleTimeString();
-            const senderName = sender === clientId ? 'Вы' : escapeHtml(sender);
 
             messageDiv.innerHTML = `
                 <div class="message-header">
-                    <span class="message-sender">${senderName}</span>
+                    <span class="message-sender">${escapeHtml(sender)}</span>
                     <span class="message-time">${time}</span>
                 </div>
                 <div class="message-content">${escapeHtml(content)}</div>
@@ -576,20 +554,14 @@
             messagesDiv.scrollTop = messagesDiv.scrollHeight;
         }
 
-        // Отправка сообщения
         function sendMessage() {
             const content = messageInput.value.trim();
-            if (!content) return;
+            if (!content || !ws || ws.readyState !== WebSocket.OPEN) return;
 
-            if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({ type: 'chat', content: content }));
-                messageInput.value = '';
-            } else {
-                addSystemMessage('❌ Нет подключения к серверу');
-            }
+            ws.send(JSON.stringify({ type: 'chat', content: content }));
+            messageInput.value = '';
         }
 
-        // Получение списка пользователей
         async function fetchUsers() {
             try {
                 const response = await fetch('/rooms');
@@ -598,19 +570,17 @@
                 if (data.room_details && data.room_details[currentRoom]) {
                     const users = data.room_details[currentRoom].clients || [];
                     updateUsersList(users);
-                    onlineCountSpan.textContent = `👥 ${users.length} онлайн`;
                 }
             } catch (error) {
                 console.error('Error fetching users:', error);
             }
         }
 
-        // Обновление списка пользователей
         function updateUsersList(users) {
             if (!usersListDiv) return;
 
             if (users.length === 0) {
-                usersListDiv.innerHTML = '<div style="color: #95a5a6; text-align: center;">Нет пользователей</div>';
+                usersListDiv.innerHTML = '<div style="color: #95a5a6;">Нет пользователей</div>';
                 return;
             }
 
@@ -618,320 +588,25 @@
             users.forEach(user => {
                 const userItem = document.createElement('div');
                 userItem.className = 'user-item';
-                if (user !== clientId) {
-                    const isCalling = activeCall === user;
-                    userItem.innerHTML = `
-                        <span>👤 ${escapeHtml(user)}</span>
-                        <button class="call-btn ${isCalling ? 'active-call' : ''}"
-                                onclick="startCall('${escapeHtml(user)}')">
-                            ${isCalling ? '📞 В звонке' : '📞 Видеозвонок'}
-                        </button>
-                    `;
-                } else {
-                    userItem.innerHTML = `<span>👤 ${escapeHtml(user)} (Вы)</span>`;
-                }
+                userItem.innerHTML = user === currentUser.username ?
+                    `👤 ${escapeHtml(user)} (Вы)` :
+                    `👤 ${escapeHtml(user)}`;
                 usersListDiv.appendChild(userItem);
             });
         }
 
-        // WebRTC функции
-        async function startCall(targetClientId) {
-            if (activeCall) {
-                addSystemMessage(`Уже в звонке с ${activeCall}. Завершите текущий звонок.`);
-                return;
-            }
-
-            try {
-                addSystemMessage(`📞 Инициализация звонка для ${targetClientId}...`);
-
-                // Получаем доступ к медиа
-                localStream = await navigator.mediaDevices.getUserMedia({
-                    video: true,
-                    audio: true
-                });
-
-                // Показываем видео
-                videoArea.classList.add('active');
-                endCallBtn.style.display = 'block';
-
-                // Создаем видео элементы
-                videosContainer.innerHTML = `
-                    <div class="video-wrapper">
-                        <video id="localVideo" autoplay muted playsinline></video>
-                        <div class="video-label">Вы</div>
-                        <button class="mic-control" onclick="toggleMute()">🔊 Микрофон</button>
-                    </div>
-                    <div class="video-wrapper">
-                        <video id="remoteVideo" autoplay playsinline></video>
-                        <div class="video-label">${escapeHtml(targetClientId)}</div>
-                    </div>
-                `;
-
-                document.getElementById('localVideo').srcObject = localStream;
-
-                // Создаем RTCPeerConnection
-                const pc = new RTCPeerConnection({
-                    iceServers: [
-                        { urls: 'stun:stun.l.google.com:19302' },
-                        { urls: 'stun:stun1.l.google.com:19302' },
-                        { urls: 'stun:stun2.l.google.com:19302' }
-                    ]
-                });
-
-                peerConnections.set(targetClientId, pc);
-                activeCall = targetClientId;
-
-                // Добавляем треки
-                localStream.getTracks().forEach(track => {
-                    pc.addTrack(track, localStream);
-                });
-
-                // ICE кандидаты
-                pc.onicecandidate = (event) => {
-                    if (event.candidate && webrtcWs && webrtcWs.readyState === WebSocket.OPEN) {
-                        webrtcWs.send(JSON.stringify({
-                            type: 'ice-candidate',
-                            target: targetClientId,
-                            candidate: event.candidate
-                        }));
-                    }
-                };
-
-                // Получение удаленного потока
-                pc.ontrack = (event) => {
-                    const remoteVideo = document.getElementById('remoteVideo');
-                    if (remoteVideo) {
-                        remoteVideo.srcObject = event.streams[0];
-                    }
-                };
-
-                // Создаем offer
-                const offer = await pc.createOffer();
-                await pc.setLocalDescription(offer);
-
-                webrtcWs.send(JSON.stringify({
-                    type: 'offer',
-                    target: targetClientId,
-                    offer: offer
-                }));
-
-                addSystemMessage(`📞 Звонок пользователю ${targetClientId}...`);
-
-            } catch (error) {
-                console.error('Ошибка при начале звонка:', error);
-                addSystemMessage(`❌ Не удалось получить доступ к камере/микрофону: ${error.message}`);
-                endCall();
-            }
-        }
-
-        async function handleWebRTCSignal(signal) {
-            console.log('WebRTC signal:', signal.type, signal.from);
-
-            const { type, from, offer, answer, candidate } = signal;
-
-            if (type === 'offer') {
-                // Сохраняем offer и показываем уведомление
-                pendingOffer = { from, offer };
-                showIncomingCall(from);
-
-            } else if (type === 'answer') {
-                const pc = peerConnections.get(from);
-                if (pc && answer) {
-                    await pc.setRemoteDescription(answer);
-                }
-
-            } else if (type === 'ice-candidate') {
-                const pc = peerConnections.get(from);
-                if (pc && candidate) {
-                    await pc.addIceCandidate(candidate);
-                }
-            }
-        }
-
-        function showIncomingCall(from) {
-            // Создаем уведомление
-            const notification = document.createElement('div');
-            notification.className = 'incoming-call';
-            notification.innerHTML = `
-                <strong>📞 Входящий звонок</strong><br>
-                от ${escapeHtml(from)}
-                <div style="margin-top: 10px;">
-                    <button class="accept-call" onclick="acceptCall()">✅ Принять</button>
-                    <button class="reject-call" onclick="rejectCall()">❌ Отклонить</button>
-                </div>
-            `;
-            document.body.appendChild(notification);
-
-            // Сохраняем обработчики
-            window.acceptCall = () => {
-                notification.remove();
-                acceptCallInternal(from);
-            };
-
-            window.rejectCall = () => {
-                notification.remove();
-                webrtcWs.send(JSON.stringify({
-                    type: 'reject',
-                    target: from
-                }));
-                addSystemMessage(`❌ Звонок от ${from} отклонен`);
-            };
-
-            // Автоматическое удаление через 30 секунд
-            setTimeout(() => {
-                if (notification.parentNode) {
-                    notification.remove();
-                }
-            }, 30000);
-        }
-
-        async function acceptCallInternal(from) {
-            try {
-                addSystemMessage(`📞 Принятие звонка от ${from}...`);
-
-                // Получаем доступ к медиа
-                localStream = await navigator.mediaDevices.getUserMedia({
-                    video: true,
-                    audio: true
-                });
-
-                // Показываем видео
-                videoArea.classList.add('active');
-                endCallBtn.style.display = 'block';
-
-                videosContainer.innerHTML = `
-                    <div class="video-wrapper">
-                        <video id="localVideo" autoplay muted playsinline></video>
-                        <div class="video-label">Вы</div>
-                        <button class="mic-control" onclick="toggleMute()">🔊 Микрофон</button>
-                    </div>
-                    <div class="video-wrapper">
-                        <video id="remoteVideo" autoplay playsinline></video>
-                        <div class="video-label">${escapeHtml(from)}</div>
-                    </div>
-                `;
-
-                document.getElementById('localVideo').srcObject = localStream;
-
-                // Создаем RTCPeerConnection
-                const pc = new RTCPeerConnection({
-                    iceServers: [
-                        { urls: 'stun:stun.l.google.com:19302' },
-                        { urls: 'stun:stun1.l.google.com:19302' }
-                    ]
-                });
-
-                peerConnections.set(from, pc);
-                activeCall = from;
-
-                // Добавляем треки
-                localStream.getTracks().forEach(track => {
-                    pc.addTrack(track, localStream);
-                });
-
-                // ICE кандидаты
-                pc.onicecandidate = (event) => {
-                    if (event.candidate && webrtcWs && webrtcWs.readyState === WebSocket.OPEN) {
-                        webrtcWs.send(JSON.stringify({
-                            type: 'ice-candidate',
-                            target: from,
-                            candidate: event.candidate
-                        }));
-                    }
-                };
-
-                // Получение удаленного потока
-                pc.ontrack = (event) => {
-                    const remoteVideo = document.getElementById('remoteVideo');
-                    if (remoteVideo) {
-                        remoteVideo.srcObject = event.streams[0];
-                    }
-                };
-
-                // Устанавливаем offer и создаем answer
-                await pc.setRemoteDescription(pendingOffer.offer);
-                const answer = await pc.createAnswer();
-                await pc.setLocalDescription(answer);
-
-                webrtcWs.send(JSON.stringify({
-                    type: 'answer',
-                    target: from,
-                    answer: answer
-                }));
-
-                addSystemMessage(`📞 Звонок с ${from} установлен`);
-                pendingOffer = null;
-
-            } catch (error) {
-                console.error('Ошибка при принятии звонка:', error);
-                addSystemMessage(`❌ Ошибка при подключении: ${error.message}`);
-                endCall();
-            }
-        }
-
-        function endCall() {
-            if (activeCall && peerConnections.has(activeCall)) {
-                const pc = peerConnections.get(activeCall);
-                pc.close();
-                peerConnections.delete(activeCall);
-            }
-
-            if (localStream) {
-                localStream.getTracks().forEach(track => track.stop());
-                localStream = null;
-            }
-
-            videoArea.classList.remove('active');
-            endCallBtn.style.display = 'none';
-            videosContainer.innerHTML = '';
-            activeCall = null;
-            pendingOffer = null;
-
-            addSystemMessage('🔴 Звонок завершен');
-
-            // Обновляем список пользователей для сброса статуса кнопки
-            fetchUsers();
-        }
-
-        function toggleMute() {
-            if (localStream) {
-                const audioTrack = localStream.getAudioTracks()[0];
-                if (audioTrack) {
-                    audioTrack.enabled = !audioTrack.enabled;
-                    const micBtn = document.querySelector('.mic-control');
-                    if (micBtn) {
-                        micBtn.textContent = audioTrack.enabled ? '🔊 Микрофон' : '🔇 Микрофон выкл';
-                    }
-                }
-            }
-        }
-
-        // Смена комнаты
         function changeRoom(room) {
             if (room === currentRoom) return;
 
-            // Завершаем звонок
-            if (activeCall) {
-                endCall();
-            }
-
             currentRoom = room;
-            currentRoomSpan.textContent = room;
+            document.getElementById('currentRoom').textContent = room;
 
-            // Очищаем сообщения
             messagesDiv.innerHTML = '';
             addSystemMessage(`Переход в комнату ${room}...`);
 
-            // Переподключаемся
             if (ws) ws.close();
-            if (webrtcWs) webrtcWs.close();
+            setTimeout(connectWebSocket, 100);
 
-            setTimeout(() => {
-                connectWebSocket();
-                connectWebRTC();
-            }, 100);
-
-            // Обновляем активную комнату
             document.querySelectorAll('.room-item').forEach(item => {
                 item.classList.remove('active');
                 if (item.dataset.room === room) {
@@ -942,35 +617,27 @@
             setTimeout(fetchUsers, 1000);
         }
 
-        // Вспомогательные функции
+        function logout() {
+            localStorage.removeItem('token');
+            localStorage.removeItem('user');
+            if (ws) ws.close();
+            location.reload();
+        }
+
         function escapeHtml(text) {
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
         }
 
-        // Инициализация
-        function init() {
-            console.log('Initializing app...');
-            connectWebSocket();
-            connectWebRTC();
-
-            sendBtn.addEventListener('click', sendMessage);
-            messageInput.addEventListener('keypress', (e) => {
-                if (e.key === 'Enter') sendMessage();
-            });
-
-            endCallBtn.addEventListener('click', endCall);
-
-            document.querySelectorAll('.room-item').forEach(item => {
-                item.addEventListener('click', () => changeRoom(item.dataset.room));
-            });
-
-            setInterval(fetchUsers, 5000);
-            setTimeout(fetchUsers, 1000);
+        // Проверка сохраненной сессии
+        const savedToken = localStorage.getItem('token');
+        const savedUser = localStorage.getItem('user');
+        if (savedToken && savedUser) {
+            token = savedToken;
+            currentUser = JSON.parse(savedUser);
+            initChat();
         }
-
-        init();
     </script>
 </body>
 </html>

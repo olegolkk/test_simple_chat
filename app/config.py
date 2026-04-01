@@ -9,6 +9,11 @@ class Settings:
     APP_TITLE: str = "WebSocket + WebRTC Chat Server"
     APP_VERSION: str = "1.0.0"
 
+    # JWT настройки
+    SECRET_KEY: str = os.getenv("SECRET_KEY", "your-secret-key-change-this")
+    ALGORITHM: str = os.getenv("ALGORITHM", "HS256")
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
+
     # CORS настройки
     CORS_ALLOW_ORIGINS: List[str] = ["*"]
     CORS_ALLOW_CREDENTIALS: bool = True

@@ -1,31 +1,49 @@
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
 import json
 from datetime import datetime
-from app.api.routes import connection_manager, webrtc_manager
+from app.managers import ConnectionManager
+from app.auth.dependencies import get_current_user_optional
 from app.utils.logger import logger
 
 websocket_router = APIRouter()
+manager = ConnectionManager()
 
 
-@websocket_router.websocket("/ws/{client_id}/{room}")
+@websocket_router.websocket("/ws/{room}")
 async def websocket_endpoint(
-    websocket: WebSocket,
-    client_id: str,
-    room: str = "general"
+        websocket: WebSocket,
+        room: str = "general",
+        token: str = Query(None)
 ) -> None:
-    """WebSocket эндпоинт для чата"""
+    """WebSocket эндпоинт с аутентификацией"""
+
+    # Проверяем токен
     try:
-        await connection_manager.connect(websocket, client_id, room)
+        from app.auth.auth import AuthHandler
+        user = AuthHandler.get_current_user(token) if token else None
+        if not user:
+            await websocket.close(code=1008, reason="Authentication required")
+            return
+
+        client_id = user["username"]
+
+    except Exception as e:
+        await websocket.close(code=1008, reason="Invalid token")
+        logger.error(f"Authentication error: {e}")
+        return
+
+    try:
+        await manager.connect(websocket, client_id, room)
 
         # Приветственное сообщение
-        await connection_manager.send_personal_message({
+        await manager.send_personal_message({
             "type": "system",
-            "content": f"Добро пожаловать в комнату {room}!",
+            "content": f"Добро пожаловать в комнату {room}, {client_id}!",
             "timestamp": datetime.now().isoformat()
         }, client_id)
 
         # Уведомление о новом пользователе
-        await connection_manager.broadcast_to_room({
+        await manager.broadcast_to_room({
             "type": "system",
             "content": f"Пользователь {client_id} присоединился к чату",
             "timestamp": datetime.now().isoformat()
@@ -35,50 +53,27 @@ async def websocket_endpoint(
             data = await websocket.receive_text()
             message = json.loads(data)
 
-            message["client_id"] = client_id
-            message["room"] = room
-            message["timestamp"] = datetime.now().isoformat()
+            message_type = message.get("type")
 
-            await connection_manager.broadcast_to_room({
-                "type": "chat",
-                "content": message.get("content", ""),
-                "client_id": client_id,
-                "timestamp": message["timestamp"]
-            }, room)
+            if message_type == "chat":
+                content = message.get("content", "")
+
+                # Отправляем сообщение всем в комнате
+                await manager.broadcast_to_room({
+                    "type": "chat",
+                    "content": content,
+                    "client_id": client_id,
+                    "timestamp": datetime.now().isoformat()
+                }, room)
 
     except WebSocketDisconnect:
-        connection_manager.disconnect(client_id, room)
-        await connection_manager.broadcast_to_room({
+        manager.disconnect(client_id, room)
+
+        await manager.broadcast_to_room({
             "type": "system",
             "content": f"Пользователь {client_id} покинул чат",
             "timestamp": datetime.now().isoformat()
         }, room)
     except Exception as e:
         logger.error(f"WebSocket error: {e}")
-        connection_manager.disconnect(client_id, room)
-
-
-@websocket_router.websocket("/ws/webrtc/{room}/{client_id}")
-async def webrtc_signaling(
-    websocket: WebSocket,
-    room: str,
-    client_id: str
-) -> None:
-    """WebSocket эндпоинт для WebRTC сигналинга"""
-    try:
-        await webrtc_manager.connect(websocket, room, client_id)
-
-        while True:
-            data = await websocket.receive_text()
-            message = json.loads(data)
-
-            if message.get("target"):
-                target = message["target"]
-                message["from"] = client_id
-                await webrtc_manager.send_to_client(room, target, message)
-
-    except WebSocketDisconnect:
-        webrtc_manager.disconnect(room, client_id)
-    except Exception as e:
-        logger.error(f"WebRTC error: {e}")
-        webrtc_manager.disconnect(room, client_id)
+        manager.disconnect(client_id, room)
