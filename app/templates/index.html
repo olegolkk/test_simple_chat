@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Чат с аутентификацией</title>
+    <title>Чат с видеозвонками</title>
     <style>
         * {
             margin: 0;
@@ -131,6 +131,12 @@
             margin-bottom: 5px;
         }
 
+        .online-count {
+            font-size: 11px;
+            color: #1abc9c;
+            margin-top: 5px;
+        }
+
         .logout-btn {
             background: #e74c3c;
             color: white;
@@ -178,6 +184,28 @@
             background: #34495e;
             border-radius: 4px;
             font-size: 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .call-btn {
+            background: #1abc9c;
+            border: none;
+            color: white;
+            padding: 4px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 10px;
+            transition: all 0.3s;
+        }
+
+        .call-btn:hover {
+            background: #16a085;
+        }
+
+        .call-btn.active-call {
+            background: #e74c3c;
         }
 
         .chat-area {
@@ -193,6 +221,67 @@
 
         .chat-header h2 {
             color: #2c3e50;
+        }
+
+        .video-area {
+            background: #1a1a2e;
+            padding: 20px;
+            display: none;
+        }
+
+        .video-area.active {
+            display: block;
+        }
+
+        .videos-container {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+
+        .video-wrapper {
+            flex: 1;
+            min-width: 300px;
+            position: relative;
+            background: #16213e;
+            border-radius: 12px;
+            overflow: hidden;
+        }
+
+        .video-wrapper video {
+            width: 100%;
+            background: #0f0f1f;
+            border-radius: 12px;
+            transform: scaleX(-1);
+        }
+
+        .video-label {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            background: rgba(0,0,0,0.7);
+            color: white;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+        }
+
+        .call-controls {
+            margin-top: 15px;
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+        }
+
+        .call-btn-large {
+            background: #e74c3c;
+            color: white;
+            border: none;
+            padding: 10px 24px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
         }
 
         .messages-area {
@@ -302,15 +391,48 @@
             border-top: 1px solid #ddd;
         }
 
-        .online-count {
-            font-size: 11px;
-            color: #1abc9c;
-            margin-top: 5px;
+        .incoming-call {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: white;
+            padding: 15px 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            z-index: 1000;
+            animation: slideIn 0.3s;
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(100%);
+            }
+            to {
+                transform: translateX(0);
+            }
+        }
+
+        .incoming-call button {
+            margin-left: 10px;
+            padding: 5px 15px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+
+        .accept-call {
+            background: #2ecc71;
+            color: white;
+        }
+
+        .reject-call {
+            background: #e74c3c;
+            color: white;
         }
     </style>
 </head>
 <body>
-    <!-- Форма авторизации -->
+    <!-- Формы авторизации -->
     <div id="authContainer" class="auth-container">
         <div class="auth-box">
             <h2>Вход в чат</h2>
@@ -387,9 +509,16 @@
                 <h2 id="currentRoom">general</h2>
             </div>
 
+            <div class="video-area" id="videoArea">
+                <div class="videos-container" id="videosContainer"></div>
+                <div class="call-controls">
+                    <button class="call-btn-large" id="endCallBtn" style="display: none;">🔴 Завершить звонок</button>
+                </div>
+            </div>
+
             <div class="messages-area" id="messages">
                 <div class="message system">
-                    <div class="message-content">Добро пожаловать в чат!</div>
+                    <div class="message-content">Добро пожаловать в чат! Нажмите 📞 для видеозвонка</div>
                 </div>
             </div>
 
@@ -404,9 +533,16 @@
 
     <script>
         let ws = null;
+        let webrtcWs = null;
         let token = null;
         let currentUser = null;
         let currentRoom = 'general';
+
+        // WebRTC переменные
+        let localStream = null;
+        let peerConnections = new Map();
+        let activeCall = null;
+        let pendingOffer = null;
 
         // DOM элементы
         const authContainer = document.getElementById('authContainer');
@@ -419,6 +555,9 @@
         const usersListDiv = document.getElementById('usersList');
         const usernameSpan = document.getElementById('username');
         const onlineCountSpan = document.getElementById('onlineCount');
+        const videoArea = document.getElementById('videoArea');
+        const endCallBtn = document.getElementById('endCallBtn');
+        const videosContainer = document.getElementById('videosContainer');
 
         // Показ форм
         function showLogin() {
@@ -513,30 +652,31 @@
             usernameSpan.textContent = currentUser.username;
 
             connectWebSocket();
+            connectWebRTC();
 
             sendBtn.addEventListener('click', sendMessage);
             messageInput.addEventListener('keypress', (e) => {
                 if (e.key === 'Enter') sendMessage();
             });
 
+            endCallBtn.addEventListener('click', endCall);
+
             document.querySelectorAll('.room-item').forEach(item => {
                 item.addEventListener('click', () => changeRoom(item.dataset.room));
             });
         }
 
-        // Подключение WebSocket
+        // Подключение WebSocket чата
         function connectWebSocket() {
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             const url = `${protocol}//${window.location.host}/ws/${currentRoom}?token=${token}`;
 
-            if (ws) {
-                ws.close();
-            }
+            if (ws) ws.close();
 
             ws = new WebSocket(url);
 
             ws.onopen = () => {
-                console.log('WebSocket connected');
+                console.log('Chat WebSocket connected');
                 statusDiv.innerHTML = '✅ Подключен к чату';
                 statusDiv.style.background = '#d4edda';
                 statusDiv.style.color = '#155724';
@@ -544,24 +684,43 @@
 
             ws.onmessage = (event) => {
                 const message = JSON.parse(event.data);
-                handleMessage(message);
+                handleChatMessage(message);
             };
 
             ws.onclose = () => {
-                console.log('WebSocket disconnected');
+                console.log('Chat WebSocket disconnected');
                 statusDiv.innerHTML = '❌ Отключен. Переподключение...';
                 statusDiv.style.background = '#f8d7da';
                 statusDiv.style.color = '#721c24';
                 setTimeout(connectWebSocket, 3000);
             };
+        }
 
-            ws.onerror = (error) => {
-                console.error('WebSocket error:', error);
+        // Подключение WebRTC сигналинга
+        function connectWebRTC() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const url = `${protocol}//${window.location.host}/ws/webrtc/${currentRoom}?token=${token}`;
+
+            if (webrtcWs) webrtcWs.close();
+
+            webrtcWs = new WebSocket(url);
+
+            webrtcWs.onopen = () => {
+                console.log('WebRTC signaling connected');
+            };
+
+            webrtcWs.onmessage = async (event) => {
+                const signal = JSON.parse(event.data);
+                await handleWebRTCSignal(signal);
+            };
+
+            webrtcWs.onclose = () => {
+                console.log('WebRTC signaling disconnected');
+                setTimeout(connectWebRTC, 3000);
             };
         }
 
-        // Обработка сообщений
-        function handleMessage(message) {
+        function handleChatMessage(message) {
             switch(message.type) {
                 case 'system':
                     addSystemMessage(message.content);
@@ -623,28 +782,276 @@
             users.forEach(user => {
                 const userItem = document.createElement('div');
                 userItem.className = 'user-item';
-                userItem.innerHTML = user === currentUser.username ?
-                    `👤 ${escapeHtml(user)} (Вы)` :
-                    `👤 ${escapeHtml(user)}`;
+                if (user !== currentUser.username) {
+                    const isCalling = activeCall === user;
+                    userItem.innerHTML = `
+                        <span>👤 ${escapeHtml(user)}</span>
+                        <button class="call-btn ${isCalling ? 'active-call' : ''}"
+                                onclick="startCall('${escapeHtml(user)}')">
+                            ${isCalling ? '📞 В звонке' : '📞 Видеозвонок'}
+                        </button>
+                    `;
+                } else {
+                    userItem.innerHTML = `<span>👤 ${escapeHtml(user)} (Вы)</span>`;
+                }
                 usersListDiv.appendChild(userItem);
             });
+        }
+
+        // WebRTC функции
+        async function startCall(targetClientId) {
+            if (activeCall) {
+                addSystemMessage(`Уже в звонке с ${activeCall}. Завершите текущий звонок.`);
+                return;
+            }
+
+            try {
+                addSystemMessage(`📞 Инициализация звонка для ${targetClientId}...`);
+
+                localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+
+                videoArea.classList.add('active');
+                endCallBtn.style.display = 'block';
+
+                videosContainer.innerHTML = `
+                    <div class="video-wrapper">
+                        <video id="localVideo" autoplay muted playsinline></video>
+                        <div class="video-label">Вы</div>
+                    </div>
+                    <div class="video-wrapper">
+                        <video id="remoteVideo" autoplay playsinline></video>
+                        <div class="video-label">${escapeHtml(targetClientId)}</div>
+                    </div>
+                `;
+
+                document.getElementById('localVideo').srcObject = localStream;
+
+                const pc = new RTCPeerConnection({
+                    iceServers: [
+                        { urls: 'stun:stun.l.google.com:19302' },
+                        { urls: 'stun:stun1.l.google.com:19302' }
+                    ]
+                });
+
+                peerConnections.set(targetClientId, pc);
+                activeCall = targetClientId;
+
+                localStream.getTracks().forEach(track => {
+                    pc.addTrack(track, localStream);
+                });
+
+                pc.onicecandidate = (event) => {
+                    if (event.candidate && webrtcWs && webrtcWs.readyState === WebSocket.OPEN) {
+                        webrtcWs.send(JSON.stringify({
+                            type: 'webrtc_ice',
+                            target: targetClientId,
+                            data: event.candidate
+                        }));
+                    }
+                };
+
+                pc.ontrack = (event) => {
+                    const remoteVideo = document.getElementById('remoteVideo');
+                    if (remoteVideo) {
+                        remoteVideo.srcObject = event.streams[0];
+                    }
+                };
+
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+
+                webrtcWs.send(JSON.stringify({
+                    type: 'webrtc_offer',
+                    target: targetClientId,
+                    data: offer
+                }));
+
+                addSystemMessage(`📞 Звонок пользователю ${targetClientId}...`);
+                updateUsersList(Array.from(document.querySelectorAll('.user-item')).map(item => item.textContent.trim()));
+
+            } catch (error) {
+                console.error('Ошибка при начале звонка:', error);
+                addSystemMessage(`❌ Не удалось получить доступ к камере/микрофону: ${error.message}`);
+                endCall();
+            }
+        }
+
+        async function handleWebRTCSignal(signal) {
+            console.log('WebRTC signal:', signal.type, signal.from);
+
+            const { type, from, data } = signal;
+
+            if (type === 'webrtc_offer') {
+                pendingOffer = { from, offer: data };
+                showIncomingCall(from);
+
+            } else if (type === 'webrtc_answer') {
+                const pc = peerConnections.get(from);
+                if (pc && data) {
+                    await pc.setRemoteDescription(data);
+                }
+
+            } else if (type === 'webrtc_ice') {
+                const pc = peerConnections.get(from);
+                if (pc && data) {
+                    await pc.addIceCandidate(data);
+                }
+            }
+        }
+
+        function showIncomingCall(from) {
+            const notification = document.createElement('div');
+            notification.className = 'incoming-call';
+            notification.innerHTML = `
+                <strong>📞 Входящий звонок</strong><br>
+                от ${escapeHtml(from)}
+                <div style="margin-top: 10px;">
+                    <button class="accept-call" onclick="acceptCall()">✅ Принять</button>
+                    <button class="reject-call" onclick="rejectCall()">❌ Отклонить</button>
+                </div>
+            `;
+            document.body.appendChild(notification);
+
+            window.acceptCall = () => {
+                notification.remove();
+                acceptCallInternal(from);
+            };
+
+            window.rejectCall = () => {
+                notification.remove();
+                if (webrtcWs && webrtcWs.readyState === WebSocket.OPEN) {
+                    webrtcWs.send(JSON.stringify({
+                        type: 'webrtc_reject',
+                        target: from
+                    }));
+                }
+                addSystemMessage(`❌ Звонок от ${from} отклонен`);
+            };
+
+            setTimeout(() => {
+                if (notification.parentNode) {
+                    notification.remove();
+                }
+            }, 30000);
+        }
+
+        async function acceptCallInternal(from) {
+            try {
+                addSystemMessage(`📞 Принятие звонка от ${from}...`);
+
+                localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+
+                videoArea.classList.add('active');
+                endCallBtn.style.display = 'block';
+
+                videosContainer.innerHTML = `
+                    <div class="video-wrapper">
+                        <video id="localVideo" autoplay muted playsinline></video>
+                        <div class="video-label">Вы</div>
+                    </div>
+                    <div class="video-wrapper">
+                        <video id="remoteVideo" autoplay playsinline></video>
+                        <div class="video-label">${escapeHtml(from)}</div>
+                    </div>
+                `;
+
+                document.getElementById('localVideo').srcObject = localStream;
+
+                const pc = new RTCPeerConnection({
+                    iceServers: [
+                        { urls: 'stun:stun.l.google.com:19302' },
+                        { urls: 'stun:stun1.l.google.com:19302' }
+                    ]
+                });
+
+                peerConnections.set(from, pc);
+                activeCall = from;
+
+                localStream.getTracks().forEach(track => {
+                    pc.addTrack(track, localStream);
+                });
+
+                pc.onicecandidate = (event) => {
+                    if (event.candidate && webrtcWs && webrtcWs.readyState === WebSocket.OPEN) {
+                        webrtcWs.send(JSON.stringify({
+                            type: 'webrtc_ice',
+                            target: from,
+                            data: event.candidate
+                        }));
+                    }
+                };
+
+                pc.ontrack = (event) => {
+                    const remoteVideo = document.getElementById('remoteVideo');
+                    if (remoteVideo) {
+                        remoteVideo.srcObject = event.streams[0];
+                    }
+                };
+
+                await pc.setRemoteDescription(pendingOffer.offer);
+                const answer = await pc.createAnswer();
+                await pc.setLocalDescription(answer);
+
+                webrtcWs.send(JSON.stringify({
+                    type: 'webrtc_answer',
+                    target: from,
+                    data: answer
+                }));
+
+                addSystemMessage(`📞 Звонок с ${from} установлен`);
+                pendingOffer = null;
+                updateUsersList(Array.from(document.querySelectorAll('.user-item')).map(item => item.textContent.trim()));
+
+            } catch (error) {
+                console.error('Ошибка при принятии звонка:', error);
+                addSystemMessage(`❌ Ошибка при подключении: ${error.message}`);
+                endCall();
+            }
+        }
+
+        function endCall() {
+            if (activeCall && peerConnections.has(activeCall)) {
+                const pc = peerConnections.get(activeCall);
+                pc.close();
+                peerConnections.delete(activeCall);
+            }
+
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+                localStream = null;
+            }
+
+            videoArea.classList.remove('active');
+            endCallBtn.style.display = 'none';
+            videosContainer.innerHTML = '';
+            activeCall = null;
+            pendingOffer = null;
+
+            addSystemMessage('🔴 Звонок завершен');
+            updateUsersList(Array.from(document.querySelectorAll('.user-item')).map(item => item.textContent.trim()));
         }
 
         function changeRoom(room) {
             if (room === currentRoom) return;
 
+            if (activeCall) {
+                endCall();
+            }
+
             currentRoom = room;
             document.getElementById('currentRoom').textContent = room;
 
-            // Очищаем сообщения
             messagesDiv.innerHTML = '';
             addSystemMessage(`Переход в комнату ${room}...`);
 
-            // Переподключаемся к новой комнате
             if (ws) ws.close();
-            setTimeout(connectWebSocket, 100);
+            if (webrtcWs) webrtcWs.close();
 
-            // Обновляем активную комнату в UI
+            setTimeout(() => {
+                connectWebSocket();
+                connectWebRTC();
+            }, 100);
+
             document.querySelectorAll('.room-item').forEach(item => {
                 item.classList.remove('active');
                 if (item.dataset.room === room) {
@@ -657,6 +1064,7 @@
             localStorage.removeItem('token');
             localStorage.removeItem('user');
             if (ws) ws.close();
+            if (webrtcWs) webrtcWs.close();
             location.reload();
         }
 

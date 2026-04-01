@@ -48,3 +48,9 @@ async def get_rooms():
             } for room, clients in connection_manager.rooms.items()
         }
     }
+
+
+@router.get("/webrtc/rooms")
+async def get_webrtc_rooms():
+    """Получить список WebRTC комнат"""
+    return webrtc_manager.get_rooms_info()

@@ -19,10 +19,10 @@ class WebRTCManager:
         self.rooms[room][client_id] = websocket
         logger.info(f"WebRTC: {client_id} connected to room {room}")
 
-        # Отправляем новому клиенту список всех участников
+        # Отправляем новому клиенту список всех участников WebRTC в комнате
         participants = list(self.rooms[room].keys())
         await websocket.send_json({
-            "type": "participants",
+            "type": "webrtc_participants",
             "participants": participants
         })
 

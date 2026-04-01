@@ -1,12 +1,13 @@
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
 import json
 from datetime import datetime
-from app.managers import ConnectionManager
+from app.managers import ConnectionManager, WebRTCManager
 from app.auth.auth import AuthHandler
 from app.utils.logger import logger
 
 websocket_router = APIRouter()
 manager = ConnectionManager()
+webrtc_manager = WebRTCManager()
 
 
 @websocket_router.websocket("/ws/{room}")
@@ -15,7 +16,7 @@ async def websocket_endpoint(
         room: str = "general",
         token: str = Query(None)
 ) -> None:
-    """WebSocket эндпоинт с аутентификацией"""
+    """WebSocket эндпоинт для чата с аутентификацией"""
 
     # Проверяем токен
     try:
@@ -76,6 +77,16 @@ async def websocket_endpoint(
                     "timestamp": datetime.now().isoformat()
                 }, room)
 
+            elif message_type == "webrtc_offer" or message_type == "webrtc_answer" or message_type == "webrtc_ice":
+                # Перенаправляем WebRTC сигналы через WebRTC менеджер
+                target = message.get("target")
+                if target:
+                    await webrtc_manager.send_to_client(room, target, {
+                        "type": message_type,
+                        "from": client_id,
+                        "data": message.get("data")
+                    })
+
     except WebSocketDisconnect:
         manager.disconnect(client_id, room)
 
@@ -92,6 +103,47 @@ async def websocket_endpoint(
     except Exception as e:
         logger.error(f"WebSocket error: {e}")
         manager.disconnect(client_id, room)
+
+
+@websocket_router.websocket("/ws/webrtc/{room}")
+async def webrtc_signaling(
+        websocket: WebSocket,
+        room: str,
+        token: str = Query(None)
+) -> None:
+    """WebSocket эндпоинт для WebRTC сигналинга с аутентификацией"""
+
+    # Проверяем токен
+    try:
+        user = AuthHandler.get_current_user(token) if token else None
+        if not user:
+            await websocket.close(code=1008, reason="Authentication required")
+            return
+
+        client_id = user["username"]
+
+    except Exception as e:
+        await websocket.close(code=1008, reason="Invalid token")
+        logger.error(f"WebRTC authentication error: {e}")
+        return
+
+    try:
+        await webrtc_manager.connect(websocket, room, client_id)
+
+        while True:
+            data = await websocket.receive_text()
+            message = json.loads(data)
+
+            if message.get("target"):
+                target = message["target"]
+                message["from"] = client_id
+                await webrtc_manager.send_to_client(room, target, message)
+
+    except WebSocketDisconnect:
+        webrtc_manager.disconnect(room, client_id)
+    except Exception as e:
+        logger.error(f"WebRTC error: {e}")
+        webrtc_manager.disconnect(room, client_id)
 
 
 async def broadcast_users_list(room: str):
