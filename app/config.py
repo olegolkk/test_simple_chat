@@ -15,6 +15,7 @@ class Settings:
     POSTGRES_DB: str = os.getenv("POSTGRES_DB", "chat_db")
     POSTGRES_USER = os.getenv("POSTGRES_USER", "user")
     POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "password")
+    POSTGRES_HOST = os.getenv("POSTGRES_HOST", "chat-dbbb")
 
     # JWT настройки
     SECRET_KEY: str = os.getenv("SECRET_KEY", "your-secret-key-change-this")
@@ -39,10 +40,10 @@ class Settings:
 
     @property
     def get_async_db_url(self):
-        return f"postgresql+asyncpg://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@chat-db:5432/{self.POSTGRES_DB}"
+        return f"postgresql+asyncpg://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@{self.POSTGRES_HOST}:5432/{self.POSTGRES_DB}"
 
     @property
     def get_sync_db_url(self):
-        return f"postgresql+psycopg2://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@chat-db:5432/{self.POSTGRES_DB}"
+        return f"postgresql+psycopg2://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@{self.POSTGRES_HOST}:5432/{self.POSTGRES_DB}"
 
 settings = Settings()
