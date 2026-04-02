@@ -5,6 +5,8 @@ from app.api.auth import router as auth_router
 from app.api.routes import router as http_router
 from app.api.websocket import websocket_router
 from app.utils.logger import logger
+from app.database import engine
+
 
 # Создание FastAPI приложения
 app = FastAPI(
@@ -27,7 +29,9 @@ app.include_router(http_router)
 app.include_router(websocket_router)
 
 logger.info("Application started successfully")
-
+from app.auth.models import Base
+Base.metadata.drop_all(engine)
+Base.metadata.create_all(engine)
 import uvicorn
 
 if __name__ == "__main__":

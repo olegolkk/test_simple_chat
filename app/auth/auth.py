@@ -1,15 +1,18 @@
 from fastapi import HTTPException, status
-from app.auth.models import create_access_token, decode_access_token
+
+from app.auth.models import User
+from app.auth.utils import create_access_token, decode_access_token
 from app.auth.crud import UserCRUD
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 class AuthHandler:
     """Обработчик аутентификации"""
 
     @staticmethod
-    def login(username: str, password: str) -> dict:
+    async def login(session: AsyncSession, username: str, password: str) -> dict:
         """Вход пользователя"""
-        user = UserCRUD.authenticate_user(username, password)
+        user = await UserCRUD.authenticate_user(session, username, password)
         if not user:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -22,14 +25,14 @@ class AuthHandler:
         return {
             "access_token": access_token,
             "token_type": "bearer",
-            "user": user.to_dict()
+            "user": user
         }
 
     @staticmethod
-    def register(username: str, email: str, password: str) -> dict:
+    async def register(session: AsyncSession, username: str, email: str, password: str) -> dict:
         """Регистрация пользователя"""
         # Проверяем существует ли пользователь
-        existing_user = UserCRUD.get_user_by_username(username)
+        existing_user = await UserCRUD.get_user_by_username(session, username)
         if existing_user:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -37,7 +40,7 @@ class AuthHandler:
             )
 
         # Проверяем email
-        existing_email = UserCRUD.get_user_by_email(email)
+        existing_email = await UserCRUD.get_user_by_email(session, email)
         if existing_email:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -45,7 +48,7 @@ class AuthHandler:
             )
 
         # Создаем пользователя
-        user = UserCRUD.create_user(username, email, password)
+        user = await UserCRUD.create_user(session, username, email, password)
 
         # Создаем токен
         access_token = create_access_token(data={"sub": user.username})
@@ -53,11 +56,11 @@ class AuthHandler:
         return {
             "access_token": access_token,
             "token_type": "bearer",
-            "user": user.to_dict()
+            "user": user
         }
 
     @staticmethod
-    def get_current_user(token: str) -> dict:
+    async def get_current_user(session: AsyncSession, token: str) -> User:
         """Получение текущего пользователя по токену"""
         payload = decode_access_token(token)
         if not payload:
@@ -73,11 +76,11 @@ class AuthHandler:
                 detail="Неверный токен"
             )
 
-        user = UserCRUD.get_user_by_username(username)
+        user = await UserCRUD.get_user_by_username(session, username)
         if not user:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Пользователь не найден"
             )
 
-        return user.to_dict()
+        return user

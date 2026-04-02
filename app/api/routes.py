@@ -1,6 +1,9 @@
 from fastapi import APIRouter, Depends
 from fastapi.responses import HTMLResponse
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.auth.dependencies import get_current_user
+from app.database import get_session
 from app.managers import ConnectionManager, WebRTCManager
 import os
 
@@ -30,10 +33,10 @@ async def get_me(current_user: dict = Depends(get_current_user)):
 
 
 @router.get("/users")
-async def get_users():
+async def get_users(session: AsyncSession = Depends(get_session)):
     """Получить список всех пользователей"""
     from app.auth.crud import UserCRUD
-    return UserCRUD.get_all_users()
+    return await UserCRUD.get_all_users(session)
 
 
 @router.get("/online")

@@ -1,48 +1,58 @@
-from typing import Optional
+from typing import Optional, Sequence
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.auth.models import User, users_db
+from app.auth.utils import verify_password, hash_password
 
 
 class UserCRUD:
     """CRUD операции с пользователями"""
 
     @staticmethod
-    def create_user(username: str, email: str, password: str) -> Optional[User]:
+    async def create_user(session: AsyncSession, username: str, email: str, password: str) -> Optional[User]:
         """Создание нового пользователя"""
-        # Проверка существования пользователя
-        if username in users_db:
-            return None
+        user = User(username=username,
+                    email=email,
+                    password_hash=hash_password(password))
 
-        # Создаем пользователя
-        user = User(username, email, password)
-        users_db[username] = user
+        session.add(user)
+        await session.commit()
         return user
 
+
     @staticmethod
-    def get_user_by_username(username: str) -> Optional[User]:
+    async def get_user_by_username(session: AsyncSession, username: str) -> Optional[User]:
         """Получение пользователя по username"""
-        return users_db.get(username)
+        query = select(User).where(User.username == username)
+        result = await session.execute(query)
+        return result.scalar_one_or_none()
+
 
     @staticmethod
-    def get_user_by_email(email: str) -> Optional[User]:
+    async def get_user_by_email(session: AsyncSession, email: str) -> Optional[User]:
         """Получение пользователя по email"""
-        for user in users_db.values():
-            if user.email == email:
-                return user
-        return None
+        query = select(User).where(User.email == email)
+        result = await session.execute(query)
+        return result.scalar_one_or_none()
+
 
     @staticmethod
-    def authenticate_user(username: str, password: str) -> Optional[User]:
+    async def authenticate_user(session: AsyncSession, username: str, password: str) -> Optional[User]:
         """Аутентификация пользователя"""
-        user = users_db.get(username)
+        user = await UserCRUD.get_user_by_username(session, username)
         if not user:
             return None
 
-        if not User.verify_password(password, user.password_hash):
+        if not verify_password(password, user.password_hash):
             return None
 
         return user
 
     @staticmethod
-    def get_all_users() -> list:
+    async def get_all_users(session: AsyncSession) -> Sequence[User]:
         """Получение всех пользователей"""
-        return [user.to_dict() for user in users_db.values()]
+        query = select(User).order_by(User.created_at.desc())
+        result = await session.execute(query)
+        return result.scalars().all()

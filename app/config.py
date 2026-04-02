@@ -1,6 +1,8 @@
 import os
 from typing import List
+import dotenv
 
+dotenv.load_dotenv()
 
 class Settings:
     """Настройки приложения"""
@@ -8,6 +10,11 @@ class Settings:
     # Общие настройки
     APP_TITLE: str = "WebSocket + WebRTC Chat Server"
     APP_VERSION: str = "1.0.0"
+
+    # DB настройки
+    POSTGRES_DB: str = os.getenv("POSTGRES_DB", "chat_db")
+    POSTGRES_USER = os.getenv("POSTGRES_USER", "user")
+    POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "password")
 
     # JWT настройки
     SECRET_KEY: str = os.getenv("SECRET_KEY", "your-secret-key-change-this")
@@ -30,5 +37,12 @@ class Settings:
     # Логирование
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
 
+    @property
+    def get_async_db_url(self):
+        return f"postgresql+asyncpg://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@chat-db:5432/{self.POSTGRES_DB}"
+
+    @property
+    def get_sync_db_url(self):
+        return f"postgresql+psycopg2://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@chat-db:5432/{self.POSTGRES_DB}"
 
 settings = Settings()
