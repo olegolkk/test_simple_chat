@@ -1,6 +1,10 @@
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, Depends
 import json
 from datetime import datetime
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.database import get_session
 from app.managers import ConnectionManager, WebRTCManager
 from app.auth.auth import AuthHandler
 from app.utils.logger import logger
@@ -13,18 +17,19 @@ webrtc_manager = WebRTCManager()
 @websocket_router.websocket("/ws")
 async def websocket_endpoint(
         websocket: WebSocket,
+        session: AsyncSession = Depends(get_session),
         token: str = Query(None)
 ) -> None:
     """WebSocket эндпоинт для личных чатов"""
 
     # Проверяем токен
     try:
-        user = AuthHandler.get_current_user(token) if token else None
+        user = await AuthHandler.get_current_user(session, token) if token else None
         if not user:
             await websocket.close(code=1008, reason="Authentication required")
             return
 
-        user_id = user["username"]
+        user_id = user.username
 
     except Exception as e:
         await websocket.close(code=1008, reason="Invalid token")
@@ -120,18 +125,19 @@ async def websocket_endpoint(
 @websocket_router.websocket("/ws/webrtc")
 async def webrtc_signaling(
         websocket: WebSocket,
+        session: AsyncSession = Depends(get_session),
         token: str = Query(None)
 ) -> None:
     """WebSocket эндпоинт для WebRTC сигналинга"""
 
     # Проверяем токен
     try:
-        user = AuthHandler.get_current_user(token) if token else None
+        user = await AuthHandler.get_current_user(session, token) if token else None
         if not user:
             await websocket.close(code=1008, reason="Authentication required")
             return
 
-        user_id = user["username"]
+        user_id = user.username
 
     except Exception as e:
         await websocket.close(code=1008, reason="Invalid token")
